@@ -1,0 +1,66 @@
+---
+title: "DA4 -  Assignment 1"
+author: "Tamas Koncz"
+date: '2018-02-11'
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    df_print: paged
+---
+
+```{r, message=FALSE}
+require(data.table)
+require(ggplot2)
+require(gridExtra)
+require(caret)
+
+options(scipen = 999)
+
+theme_set(theme_minimal())   # globally set ggplot theme
+
+set.seed(1234)
+RMSE <- function(x, true_x) sqrt(mean((x - true_x)^2))
+```
+
+
+```{r}
+data <- fread("airbnb_london_workfile.csv", stringsAsFactors = FALSE)
+```
+
+##### Code snippet for selecting random borough: 
+
+```{r}
+boroughs <- data[, .(count = .N, 
+                     avg_price = mean(price)), 
+                 keyby = f_neighbourhood_cleansed][order(-count)]
+
+boroughs[, borough := factor(f_neighbourhood_cleansed, 
+                             levels = boroughs[order(count)][, f_neighbourhood_cleansed])]
+boroughs[, f_neighbourhood_cleansed := NULL]
+
+# randomly picking an area > 1000
+set.seed(93) #for reproducibility
+selected <- sample(boroughs[count > 1000]$borough, 1)
+
+```
+
+```{r, fig.align= 'center', fig.width= 10}
+max_count <- boroughs[, max(count)]
+max_avg_price <- boroughs[, max(avg_price)]
+
+boroughs[borough == selected, ] #TODO: make this bold on the chart
+
+ggplot(data = boroughs) + 
+  geom_bar(data = boroughs[borough == selected], aes(x = borough, y = 6000), fill = "lightblue",  stat = "identity") +
+  geom_point(aes(x = borough, y = count, color = "# of Observations"), shape = 20, size = 2) +
+  geom_segment(aes(x = borough, y = count, xend = borough, yend =0, color = "# of Observations")) + 
+  geom_point(aes(x = borough, y = avg_price * (max_count/max_avg_price), color = "Avg. Price"), shape = 4, size = 2) + 
+  scale_y_continuous(sec.axis = sec_axis(~./(max_count/max_avg_price), name = "Avg. Price")) + 
+  scale_color_manual(name = "Legend", values = c("# of Observations" = "tomato", "Avg. Price" = "darkblue")) + 
+  guides(color=guide_legend(override.aes=list(shape=15))) +
+  labs(y = "# of Observations", x = "Borough") +
+  coord_flip()
+```
+
+
