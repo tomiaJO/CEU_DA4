@@ -63,4 +63,56 @@ ggplot(data = boroughs) +
   coord_flip()
 ```
 
+```{r}
+names(data)[1:20]
+```
+```{r}
+london <- copy(data)
+london[, log_price:= log(price)]
+kensington_chelsea <- london[f_neighbourhood_cleansed == selected]
+```
+
+
+```{r}
+ggplot(data= london, aes(x = log_pricelog(price))) + geom_histogram()
+ggplot(data= kensington_chelsea, aes(x = log_price)) + geom_histogram()
+
+# TODO: add reasoning for log transformation. two hist, not-log, common density, log
+
+ggplot(data= london, aes(x = n_accommodates)) + geom_histogram()
+ggplot(data= london, aes(x = n_accommodates, y = log_price)) + geom_point() + geom_smooth()
+
+ggplot(data= london, aes(x = n_beds)) + geom_histogram()
+ggplot(data= london, aes(x = n_beds, y = log_price)) + geom_point() + geom_smooth()
+#transform both for deminishing returns?
+
+# f_room_type
+ggplot(data= london, aes(x = f_room_type)) + geom_bar()
+ggplot(data= london, aes(x = f_room_type, y = log_price)) + geom_boxplot()
+
+# f_cancellation_policy -> surprising result. correlation with sth else?
+ggplot(data= london, aes(x = f_cancellation_policy)) + geom_bar()
+ggplot(data= london, aes(x = f_cancellation_policy, y = log_price)) + geom_boxplot()
+
+#d_breakfast -> no big impact. add d_ to TOTAL?
+ggplot(data= london, aes(x = d_breakfast)) + geom_bar()
+ggplot(data= london, aes(x = factor(d_breakfast), y = log_price)) + geom_boxplot()
+
+#n_number_of_reviews
+ggplot(data= london, aes(x = n_number_of_reviews)) + geom_histogram()
+ggplot(data= kensington_chelsea, aes(x = n_number_of_reviews, y = log_price)) + geom_point() + geom_smooth()
+
+#n_minimum_nights --> some outliers, handle
+ggplot(data= london, aes(x = n_minimum_nights)) + geom_histogram()
+ggplot(data= london, aes(x = n_minimum_nights, y = log_price)) + geom_point() + geom_smooth()
+
+#f_property_type --> some interaction with other variables, eg. room type?
+ggplot(data= london, aes(x = f_property_type)) + geom_bar()
+ggplot(data= london, aes(x = f_property_type, y = log_price)) + geom_boxplot()
+
+# usd_cleaning_fee --> model non-linearity?
+london[, cleaning_fee := ifelse(is.na(usd_cleaning_fee), 0, usd_cleaning_fee)]
+ggplot(data= london, aes(x = cleaning_fee)) + geom_histogram()
+ggplot(data= london, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
+```
 
