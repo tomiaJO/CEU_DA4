@@ -80,10 +80,35 @@ london[, log_price:= log(price)]
 
 # creating a total score for dummy variables. very much simplified approach
 london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
+```
+
+```{r}
+#handling NAs
+missing_values <- as.data.table(t(london[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = names(london)]), keep.rownames=TRUE)
+setnames(missing_values, c("variable", "NA.Count"))
+
+missing_values[order(-NA.Count)][1:10]
+
+#no significance
+ggplot(data= london, aes(x = n_review_scores_rating, y = log_price)) + geom_point() + geom_smooth()
 
 # assumption: when cleaning_fee is missing, it's actually zero
 london[, cleaning_fee := ifelse(is.na(usd_cleaning_fee), 0, usd_cleaning_fee)]
 
+#step1: drop variables with lots of NAs
+london[, c("usd_cleaning_fee", 
+           "n_review_scores_rating",
+           "n_reviews_per_month",
+           "n_days_since",
+           "p_host_response_rate") := NULL]
+
+
+#step2: drop non-complete cases
+london <- london[complete.cases(london)]
+```
+
+```{r}
+#creating subset
 kensington_chelsea <- london[f_neighbourhood_cleansed == selected]
 ```
 
@@ -135,7 +160,71 @@ ggplot(data= london, aes(x = d_total)) + geom_histogram()
 ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
 ```
 
+
 ```{r}
-head(london)
+training_ratio <- 0.7
+
+set.seed(93) #for reproducibility
+train_indices <- createDataPartition(y = london[["log_price"]],
+                                     times = 1,
+                                     p = training_ratio,
+                                     list = FALSE)
+london_train <- london[train_indices, ]
+london_test <- london[-train_indices, ]
+
+set.seed(93) #for reproducibility
+train_indices <- createDataPartition(y = kensington_chelsea[["log_price"]],
+                                     times = 1,
+                                     p = training_ratio,
+                                     list = FALSE)
+kensington_chelsea_train <- kensington_chelsea[train_indices, ]
+kensington_chelsea_test <- kensington_chelsea[-train_indices, ]
+```
+
+```{r}
+fit_control <- trainControl(method = "cv", number = 10)
+#for LASSO:
+#tune_grid <- data.frame("cp" = c(0.01, 0.001, 0.0001, 0.00001, 0.000001))
+```
+
+```{r}
+#base  model - just using n_accomodates
+
+set.seed(93) #for reproducibility
+model_1_london <- train(log_price ~ n_accommodates, 
+                   data = london_train, 
+                   method = "lm", 
+                   trControl = fit_control)
+model_1_london$results[["RMSE"]]
+
+set.seed(93) #for reproducibility
+model_1_kensington_chelsea_train <- train(log_price ~ n_accommodates, 
+                   data = kensington_chelsea_train, 
+                   method = "lm", 
+                   trControl = fit_control)
+model_1_kensington_chelsea_train$results[["RMSE"]]
+```
+```{r}
+names(london)[1:20]
+```
+
+
+```{r}
+#simple model - using multiple predictor variables
+
+set.seed(93) #for reproducibility
+model_2_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms + 
+                          f_property_type + f_room_type + f_bed_type, 
+                   data = london_train, 
+                   method = "lm", 
+                   trControl = fit_control)
+model_2_london$results[["RMSE"]]
+
+set.seed(93) #for reproducibility
+model_2_kensington_chelsea_train <- train(log_price ~ n_accommodates, 
+                   data = kensington_chelsea_train, 
+                   method = "lm", 
+                   trControl = fit_control)
+model_2_kensington_chelsea_train$results[["RMSE"]]
 ```
 
