@@ -64,13 +64,11 @@ ggplot(data = boroughs) +
 ```
 
 ```{r}
-names(data)
-```
-
-```{r}
 london <- copy(data)
 rm(data)
 rm(boroughs)
+rm(max_count)
+rm(max_avg_price)
 ```
 
 
@@ -106,6 +104,11 @@ london[, c("usd_cleaning_fee",
 #step2: drop non-complete cases
 london <- london[complete.cases(london)]
 ```
+
+```{r}
+rm(missing_values)
+```
+
 
 ```{r}
 #creating subset
@@ -161,6 +164,8 @@ ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smoo
 ```
 
 
+Next step is to create separate datasets for model training and performance evaluations (same method was followed for the Kensington and Chelsea subsample): 
+
 ```{r}
 training_ratio <- 0.7
 
@@ -171,7 +176,9 @@ train_indices <- createDataPartition(y = london[["log_price"]],
                                      list = FALSE)
 london_train <- london[train_indices, ]
 london_test <- london[-train_indices, ]
+```
 
+```{r, include= FALSE}
 set.seed(93) #for reproducibility
 train_indices <- createDataPartition(y = kensington_chelsea[["log_price"]],
                                      times = 1,
@@ -180,7 +187,9 @@ train_indices <- createDataPartition(y = kensington_chelsea[["log_price"]],
 kensington_chelsea_train <- kensington_chelsea[train_indices, ]
 kensington_chelsea_test <- kensington_chelsea[-train_indices, ]
 ```
-
+ 
+ 
+Setting the control parameters for 10-fold CV:
 ```{r}
 fit_control <- trainControl(method = "cv", number = 10)
 #for LASSO:
@@ -204,6 +213,7 @@ model_1_kensington_chelsea_train <- train(log_price ~ n_accommodates,
                    trControl = fit_control)
 model_1_kensington_chelsea_train$results[["RMSE"]]
 ```
+
 ```{r}
 names(london)[1:20]
 ```
@@ -219,12 +229,39 @@ model_2_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
                    method = "lm", 
                    trControl = fit_control)
 model_2_london$results[["RMSE"]]
+```
+
+```{r, include= FALSE}
 
 set.seed(93) #for reproducibility
-model_2_kensington_chelsea_train <- train(log_price ~ n_accommodates, 
-                   data = kensington_chelsea_train, 
+model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
+                                            f_property_type + f_room_type + f_bed_type, 
+                                          data = kensington_chelsea_train, 
+                                          method = "lm",
+                                          trControl = fit_control)
+model_2_kensington_chelsea$results[["RMSE"]]
+```
+```{r}
+#checking for multicollinearity
+findLinearCombos(data.matrix(london[, .SD, .SDcols = sapply(london, is.numeric)]))
+
+```
+
+
+```{r}
+tuneGrid=expand.grid(
+              .alpha=1,
+              .lambda=seq(0, 100, by = 0.1))
+```
+
+```{r}
+#full model - most complexity, all variables
+
+set.seed(93) #for reproducibility
+model_4_london <- train(log_price ~ . -price -d_total, 
+                   data = london_train, 
                    method = "lm", 
                    trControl = fit_control)
-model_2_kensington_chelsea_train$results[["RMSE"]]
+model_4_london$results[["RMSE"]]
 ```
 
