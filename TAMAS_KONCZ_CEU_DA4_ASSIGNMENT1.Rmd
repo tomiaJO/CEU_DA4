@@ -56,7 +56,7 @@ ggplot(data = boroughs) +
   geom_point(aes(x = borough, y = count, color = "# of Observations"), shape = 20, size = 2) +
   geom_segment(aes(x = borough, y = count, xend = borough, yend =0, color = "# of Observations")) + 
   geom_point(aes(x = borough, y = avg_price * (max_count/max_avg_price), color = "Avg. Price"), shape = 4, size = 2) + 
-  scale_y_continuous(sec.axis = sec_axis(~./(max_count/max_avg_price), name = "Avg. Price")) + 
+  scale_y_continuous(limits = c(0,6000), sec.axis = sec_axis(~./(max_count/max_avg_price), name = "Avg. Price")) + 
   scale_color_manual(name = "Legend", values = c("# of Observations" = "tomato", "Avg. Price" = "darkblue")) + 
   guides(color=guide_legend(override.aes=list(shape=15))) +
   labs(y = "# of Observations", x = "Borough") +
@@ -64,17 +64,32 @@ ggplot(data = boroughs) +
 ```
 
 ```{r}
-names(data)[1:20]
+names(data)
 ```
+
 ```{r}
 london <- copy(data)
+rm(data)
+rm(boroughs)
+```
+
+
+```{r}
+# creating log price
 london[, log_price:= log(price)]
+
+# creating a total score for dummy variables. very much simplified approach
+london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
+
+# assumption: when cleaning_fee is missing, it's actually zero
+london[, cleaning_fee := ifelse(is.na(usd_cleaning_fee), 0, usd_cleaning_fee)]
+
 kensington_chelsea <- london[f_neighbourhood_cleansed == selected]
 ```
 
 
 ```{r}
-ggplot(data= london, aes(x = log_pricelog(price))) + geom_histogram()
+ggplot(data= london, aes(x = log_price)) + geom_histogram()
 ggplot(data= kensington_chelsea, aes(x = log_price)) + geom_histogram()
 
 # TODO: add reasoning for log transformation. two hist, not-log, common density, log
@@ -111,8 +126,16 @@ ggplot(data= london, aes(x = f_property_type)) + geom_bar()
 ggplot(data= london, aes(x = f_property_type, y = log_price)) + geom_boxplot()
 
 # usd_cleaning_fee --> model non-linearity?
-london[, cleaning_fee := ifelse(is.na(usd_cleaning_fee), 0, usd_cleaning_fee)]
 ggplot(data= london, aes(x = cleaning_fee)) + geom_histogram()
 ggplot(data= london, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
+
+
+# d_total
+ggplot(data= london, aes(x = d_total)) + geom_histogram()
+ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
+```
+
+```{r}
+head(london)
 ```
 
