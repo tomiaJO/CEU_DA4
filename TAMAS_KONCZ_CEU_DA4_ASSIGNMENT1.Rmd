@@ -9,7 +9,7 @@ output:
     df_print: paged
 ---
 
-```{r, message=FALSE}
+```{r setup, message=FALSE, include=FALSE}
 require(data.table)
 require(ggplot2)
 require(gridExtra)
@@ -24,13 +24,20 @@ RMSE <- function(x, true_x) sqrt(mean((x - true_x)^2))
 ```
 
 
-```{r}
+```{r, include= FALSE}
 data <- fread("airbnb_london_workfile.csv",
               stringsAsFactors = FALSE)
 ```
+ 
+ 
+ 
+ 
+  
+  
+#### Code snippet for selecting random borough 
 
-##### Code snippet for selecting random borough: 
-
+Below code was used to pick a random borough from the dataset.
+Here, and in later parts as well, where a random generator is involved in producing the results, I used set.seed(93) to help foster reproducibility of results.
 ```{r}
 boroughs <- data[, .(count = .N, 
                      avg_price = mean(price)), 
@@ -46,7 +53,8 @@ selected <- sample(boroughs[count > 1000]$borough, 1)
 
 ```
 
-```{r, fig.align= 'center', fig.width= 10}
+
+```{r, fig.align= 'center', fig.width= 10, echo= FALSE}
 max_count <- boroughs[, max(count)]
 max_avg_price <- boroughs[, max(avg_price)]
 
@@ -64,7 +72,7 @@ ggplot(data = boroughs) +
   coord_flip()
 ```
 
-```{r}
+```{r, include= FALSE}
 london <- copy(data)
 rm(data)
 rm(boroughs)
@@ -72,63 +80,96 @@ rm(max_count)
 rm(max_avg_price)
 ```
 
-```{r}
+#### Data cleaning
+
+The below steps were applied to prepare the data for analysis.
+
+    1. Handling missing (NA) values: 
+```{r, echo= FALSE}
 #handling NAs
 missing_values <- as.data.table(t(london[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = names(london)]), keep.rownames=TRUE)
 setnames(missing_values, c("variable", "NA.Count"))
 
-missing_values[order(-NA.Count)][1:10]
+missing_values[order(-NA.Count)][NA.Count>0]
+```
 
-#no significance
-ggplot(data= london, aes(x = n_review_scores_rating, y = price)) + geom_point() + geom_smooth()
+I followed the logic of checking if there seems to be any significant relationship between variables with many NA-s and price (example graph below).
+As I did not see anything meaningful, I decided to drop these variables. There might be a way to guess their values based on the data, however, given the lack of expected predicting power, I took the "clean" path.
 
-# assumption: when cleaning_fee is missing, it's actually zero
+```{r, echo= FALSE, fig.height=4, fig.align='right', fig.width=5}
+ggplot(data= london, aes(x = n_review_scores_rating, y = price)) + 
+  geom_point() + 
+  geom_smooth(method='lm')
+```
+
+Upon checking airbnb.com, I decided that the missing cleaning fees _actually_ mean 0 added cost for this item, hence I replaced NAs with zero for this one variable:
+```{r}
 london[, cleaning_fee := ifelse(is.na(usd_cleaning_fee), 0, usd_cleaning_fee)]
+```
 
-#step1: drop variables with lots of NAs
+And then just proceeded to drop the many-NA variables:
+```{r}
 london[, c("usd_cleaning_fee", 
            "n_review_scores_rating",
            "n_reviews_per_month",
            "n_days_since",
            "p_host_response_rate") := NULL]
+```
 
-
-#step2: drop non-complete cases
+We are almost done - for the reamining two variables with some NAs, I was comfortable dropping the whole observation row, as their numbers are very limited compared to the whole dataset:
+```{r}
 london <- london[complete.cases(london)]
 ```
 
+    2. Getting rid of unnecessary variables
+
+There were some variables which encoded duplicates, I just dropped all these values:
 ```{r}
-# creating log price
-london[, log_price:= log(price)]
-
-# creating a total score for dummy variables. very much simplified approach
-london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
-
-# cleaning up factor variables / duplicated
 london[, c("neighbourhood_cleansed", 
            "property_type", 
            "room_type", 
            "usd_price_day", 
            "cancellation_policy") := NULL]
+```
 
+
+```{r, include= FALSE}
 factor_cols <- names(london)[names(london) %like% "^f_.*"]
 london[, (factor_cols) := lapply(.SD, as.factor), .SDcols = factor_cols]
 ```
 
+    3. Feature engineering
+The last step of data preparation was creating a few set of additional variables that I expect to improve our models' fit.
 
-
+The first one was to create log(...) transformed version of price - this will be explained in detail in the next section.
 ```{r}
-rm(missing_values)
+london[, log_price:= log(price)]
+```
+
+I've created another variable for the dummies - this one however is a total "score" (summing up all available extras).  
+This is a very simple approach, without any weightings on different benefits - however, it can provide some insight into how people value non-core offerings.
+```{r}
+london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
+```
+
+For some variables, I've added second polinomial terms, for better fit. More explanation in the visual section to follow.
+```{r}
+# TODO: polynomial terms! 
 ```
 
 
-```{r}
+```{r, include = FALSE}
+rm(missing_values)
+```
+
+```{r, include = FALSE}
 #creating subset
 kensington_chelsea <- london[f_neighbourhood_cleansed == selected]
 ```
 
+#### Data exploration
 
-```{r}
+```{r, echo= FALSE}
 ggplot(data= london, aes(x = log_price)) + geom_histogram()
 ggplot(data= kensington_chelsea, aes(x = log_price)) + geom_histogram()
 
@@ -175,9 +216,10 @@ ggplot(data= london, aes(x = d_total)) + geom_histogram()
 ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
 ```
 
+#### Creating a hold-out test set
 
-Next step is to create separate datasets for model training and performance evaluations (same method was followed for the Kensington and Chelsea subsample): 
-
+I'm create separate datasets for model training and performance evaluations (same method was followed for the Kensington and Chelsea subsample), using basic Caret functions.  
+Model selection will be done via cross-validation on the training set.
 ```{r}
 training_ratio <- 0.7
 
@@ -201,31 +243,31 @@ kensington_chelsea_test <- kensington_chelsea[-train_indices, ]
 ```
  
  
-Setting the control parameters for 10-fold CV:
+#### Setting the control parameters for 10-fold CV  
+
 ```{r}
 fit_control <- trainControl(method = "cv", number = 10)
 ```
 
-```{r}
-#base  model - just using n_accomodates
+#### Model training
 
+I'm fitting four separte models - they share the same predictors and train(...) parameters. Hence, I'll only include code for the whole London dataset - what happens for the subsample is analogous.  
+  
+The first model is very basic - it just uses one predictor, n_accommodates. It is expected to be used rather as a benchmark, than an actual model for prediction.
+```{r}
 set.seed(93) #for reproducibility
 model_1_london <- train(log_price ~ n_accommodates, 
                    data = london_train, 
                    method = "lm", 
                    trControl = fit_control)
-model_1_london$results[["RMSE"]]
 ```
 
-```{r}
-#base  model - just using n_accomodates
-
+```{r, include= FALSE}
 set.seed(93) #for reproducibility
-model_1_kensington_chelsea_train <- train(log_price ~ n_accommodates, 
+model_1_kensington_chelsea <- train(log_price ~ n_accommodates, 
                    data = kensington_chelsea_train, 
                    method = "lm", 
                    trControl = fit_control)
-model_1_kensington_chelsea_train$results[["RMSE"]]
 ```
 
 
@@ -238,7 +280,6 @@ model_2_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
                    data = london_train, 
                    method = "lm", 
                    trControl = fit_control)
-model_2_london$results[["RMSE"]]
 ```
 
 ```{r, include= FALSE}
@@ -249,21 +290,45 @@ model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bath
                                           data = kensington_chelsea_train, 
                                           method = "lm",
                                           trControl = fit_control)
-model_2_kensington_chelsea$results[["RMSE"]]
+```
+
+```{r}
+#simple model - using multiple predictor variables
+
+set.seed(93) #for reproducibility
+model_3_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms + 
+                          f_property_type + f_room_type + f_bed_type, 
+                   data = london_train, 
+                   method = "lm", 
+                   trControl = fit_control)
+```
+
+```{r, include= FALSE}
+
+set.seed(93) #for reproducibility
+model_3_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
+                                            f_property_type + f_room_type + f_bed_type, 
+                                          data = kensington_chelsea_train, 
+                                          method = "lm",
+                                          trControl = fit_control)
 ```
 
 
+Setting up LASSO, and hyperparameter-tuning with Caret:  
 ```{r}
 tune_grid <- expand.grid("alpha" = 1,
                              "lambda" = seq(0, 0.015, 0.001))
 ```
 
 
-```{r}
-#l <- sapply(kensington_chelsea_train, function(x) is.factor(x))
-#m <- kensington_chelsea_train[, ..l]
-#str(m)
-#sapply(kensington_chelsea_train, function(x) length(unique(x)))
+```{r, include= FALSE}
+l <- sapply(kensington_chelsea_train, function(x) is.factor(x))
+m <- kensington_chelsea_train[, ..l]
+
+sapply(kensington_chelsea_train, function(x) length(unique(x)))
+
+rm(l)
+rm(m)
 ```
 
 
@@ -278,8 +343,6 @@ model_4_london <- train(log_price ~ . -price -d_total -f_neighbourhood_cleansed 
                     tuneGrid = tune_grid,
                     metric = "RMSE",
                     trControl = fit_control)
-
-model_4_london$results[["RMSE"]]
 ```
 
 
@@ -294,7 +357,48 @@ model_4_kensington_chelsea <- train(log_price ~ . -price -d_total -f_neighbourho
                     tuneGrid = tune_grid,
                     metric = "RMSE",
                     trControl = fit_control)
-
-model_4_kensington_chelsea$results[["RMSE"]]
 ```
 
+#### Selecting the best model
+
+RMSE values from the different models are below:
+```{r}
+model_1_london_rmse_cv <- model_1_london$results[["RMSE"]]
+model_2_london_rmse_cv <- model_2_london$results[["RMSE"]]
+model_3_london_rmse_cv <- model_3_london$results[["RMSE"]]
+model_4_london_rmse_cv <- model_4_london$results[["RMSE"]]
+
+model_1_kensington_chelsea_rmse_cv <- model_1_kensington_chelsea$results[["RMSE"]]
+model_2_kensington_chelsea_rmse_cv <- model_2_kensington_chelsea$results[["RMSE"]]
+model_3_kensington_chelsea_rmse_cv <- model_3_kensington_chelsea$results[["RMSE"]]
+model_4_kensington_chelsea_rmse_cv <- model_4_kensington_chelsea$results[["RMSE"]]
+```
+However, these are RMSE-s of the log_price predictions - while we are after predicting the actual prices. Let's fix this.  
+
+As the first step, we'll make predictions on the trainings set with all our models:
+```{r}
+## TODO
+```
+
+And then convert these back to normal prices (not the correction term for log(...)!):
+```{r}
+## TODO
+```
+
+And now we can check these results against the observed price information:
+```{r}
+## TODO
+```
+
+
+
+#### Evaluating the best model
+After evaluating the different models based on different criteria, and selecting the best ones, let's see how they perform on the held-out test set:
+```{r}
+#TODO
+```
+
+
+#### London prices 2018
+
+#### Budapest prices 2018
