@@ -78,6 +78,18 @@ london[, log_price:= log(price)]
 
 # creating a total score for dummy variables. very much simplified approach
 london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
+
+#cleaning up factor variables
+london[, c("neighbourhood_cleansed", 
+           "property_type", 
+           "room_type", 
+           "usd_price_day", 
+           "usd_cleaning_fee", 
+           "cancellation_policy") := NULL]
+
+factor_cols <- names(london)[names(london) %like% "^f_.*"]
+london[, (factor_cols) := lapply(.SD, as.factor), .SDcols = factor_cols]
+head(london)
 ```
 
 ```{r}
@@ -239,8 +251,14 @@ model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bath
                                           data = kensington_chelsea_train, 
                                           method = "lm",
                                           trControl = fit_control)
+predictions <- predict(model_2_kensington_chelsea, kensington_chelsea_test)
+
+RMSE(predictions, kensington_chelsea_test$log_price)
+length(kensington_chelsea_train$log_price)
+model_2_kensington_chelsea
 model_2_kensington_chelsea$results[["RMSE"]]
 ```
+
 ```{r}
 #checking for multicollinearity
 findLinearCombos(data.matrix(london[, .SD, .SDcols = sapply(london, is.numeric)]))
@@ -249,19 +267,30 @@ findLinearCombos(data.matrix(london[, .SD, .SDcols = sapply(london, is.numeric)]
 
 
 ```{r}
-tuneGrid=expand.grid(
-              .alpha=1,
-              .lambda=seq(0, 100, by = 0.1))
+tune_grid <- expand.grid("alpha" = 1,
+                             "lambda" = c(0.1, 0.01, 0.001, 0.0001))
 ```
+
+```{r}
+l <- sapply(kensington_chelsea_train, function(x) is.factor(x))
+m <- kensington_chelsea_train[, l]
+ifelse(n <- sapply(m, function(x) length(levels(x))) == 1, "DROP", "NODROP")
+```
+
 
 ```{r}
 #full model - most complexity, all variables
 
+
+
 set.seed(93) #for reproducibility
-model_4_london <- train(log_price ~ . -price -d_total, 
-                   data = london_train, 
-                   method = "lm", 
-                   trControl = fit_control)
+model_4_london <- train(log_price ~ . -price -d_total -f_neighbourhood_cleansed -neighbourhood_cleansed -d_washerdryer -d_freeparkingonstreet, 
+                    data = kensington_chelsea_train, 
+                    method = "lm",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = tune_grid,
+                    trControl = fit_control)
+
 model_4_london$results[["RMSE"]]
 ```
 
