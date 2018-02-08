@@ -3,9 +3,9 @@ title: "DA4 -  Assignment 1"
 author: "Tamas Koncz"
 date: '2018-02-11'
 output:
-  html_document:
-    df_print: paged
   html_notebook:
+    df_print: paged
+  html_document:
     df_print: paged
 ---
 
@@ -15,7 +15,9 @@ require(ggplot2)
 require(gridExtra)
 require(caret)
 
-options(scipen = 999)
+require(knitr)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
 
 theme_set(theme_minimal())   # globally set ggplot theme
 
@@ -97,7 +99,7 @@ missing_values[order(-NA.Count)][NA.Count>0]
 I followed the logic of checking if there seems to be any significant relationship between variables with many NA-s and price (example graph below).
 As I did not see anything meaningful, I decided to drop these variables. There might be a way to guess their values based on the data, however, given the lack of expected predicting power, I took the "clean" path.
 
-```{r, echo= FALSE, fig.height=4, fig.align='right', fig.width=5}
+```{r, echo= FALSE, fig.height=3, fig.align='center', fig.width=4}
 ggplot(data= london, aes(x = n_review_scores_rating, y = price)) + 
   geom_point() + 
   geom_smooth(method='lm')
@@ -155,7 +157,9 @@ london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
 
 For some variables, I've added second polinomial terms, for better fit. More explanation in the visual section to follow.
 ```{r}
-# TODO: polynomial terms! 
+london[, cleaning_fee_sq:= cleaning_fee^2]
+london[, n_accommodates_sq:= n_accommodates^2]
+london[, n_beds_sq:= n_beds^2]
 ```
 
 
@@ -168,53 +172,136 @@ rm(missing_values)
 kensington_chelsea <- london[f_neighbourhood_cleansed == selected]
 ```
 
-#### Data exploration
+#### Data exploration  
+  
+Looking at the prices variable, we can see that it's close to being lognormally distributed.
+Although log-level predictions is not without difficulties, I chose to still apply this transformation, and use log(price) is my linear models, in hope of a better fit. Corrections for the log transformation based predictions will be explained later.
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = price)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = price)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = log_price)) + geom_histogram()
+p4 <- ggplot(data= kensington_chelsea, aes(x = log_price)) + geom_histogram()
 
-```{r, echo= FALSE}
-ggplot(data= london, aes(x = log_price)) + geom_histogram()
-ggplot(data= kensington_chelsea, aes(x = log_price)) + geom_histogram()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
 
-# TODO: add reasoning for log transformation. two hist, not-log, common density, log
+I'm plotting several of the important variables below (distribution & price for both the full London dataset and for the subsample as well). I'm only going to comment on the ones which have additional consequence.  
+  
+n_accommodates:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = n_accommodates)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = n_accommodates)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = n_accommodates, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = n_accommodates, y = log_price)) + geom_point() + geom_smooth()
 
-ggplot(data= london, aes(x = n_accommodates)) + geom_histogram()
-ggplot(data= london, aes(x = n_accommodates, y = log_price)) + geom_point() + geom_smooth()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
-ggplot(data= london, aes(x = n_beds)) + geom_histogram()
-ggplot(data= london, aes(x = n_beds, y = log_price)) + geom_point() + geom_smooth()
-#transform both for deminishing returns?
+#transform for diminishing returns?
+```
+  
+  
+n_beds:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = n_beds)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = n_beds)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = n_beds, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = n_beds, y = log_price)) + geom_point() + geom_smooth()
 
-# f_room_type
-ggplot(data= london, aes(x = f_room_type)) + geom_bar()
-ggplot(data= london, aes(x = f_room_type, y = log_price)) + geom_boxplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+
+#transform for diminishing returns?
+```
+  
+  
+f_room_type:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = f_room_type)) + geom_bar() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = f_room_type)) + geom_bar() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = f_room_type, y = log_price)) + geom_boxplot()
+p4 <- ggplot(data= kensington_chelsea, aes(x = f_room_type, y = log_price)) + geom_boxplot()
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+  
+  
+f_cancellation_policy:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = f_cancellation_policy)) + geom_bar() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = f_cancellation_policy)) + geom_bar() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = f_cancellation_policy, y = log_price)) + geom_boxplot()
+p4 <- ggplot(data= kensington_chelsea, aes(x = f_cancellation_policy, y = log_price)) + geom_boxplot()
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
 # f_cancellation_policy -> surprising result. correlation with sth else?
-ggplot(data= london, aes(x = f_cancellation_policy)) + geom_bar()
-ggplot(data= london, aes(x = f_cancellation_policy, y = log_price)) + geom_boxplot()
+```
+  
+n_number_of_reviews:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = n_number_of_reviews)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = n_number_of_reviews)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = n_number_of_reviews, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = n_number_of_reviews, y = log_price)) + geom_point() + geom_smooth()
 
-#d_breakfast -> no big impact. add d_ to TOTAL?
-ggplot(data= london, aes(x = d_breakfast)) + geom_bar()
-ggplot(data= london, aes(x = factor(d_breakfast), y = log_price)) + geom_boxplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```  
+  
+n_minimum_nights:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = n_minimum_nights)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = n_minimum_nights)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = n_minimum_nights, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = n_minimum_nights, y = log_price)) + geom_point() + geom_smooth()
 
-#n_number_of_reviews
-ggplot(data= london, aes(x = n_number_of_reviews)) + geom_histogram()
-ggplot(data= kensington_chelsea, aes(x = n_number_of_reviews, y = log_price)) + geom_point() + geom_smooth()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
-#n_minimum_nights --> some outliers, handle
-ggplot(data= london, aes(x = n_minimum_nights)) + geom_histogram()
-ggplot(data= london, aes(x = n_minimum_nights, y = log_price)) + geom_point() + geom_smooth()
+##well this looks strange... transform to dummy?
+```  
+  
+f_cancellation_policy:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = f_property_type)) + geom_bar() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = f_property_type)) + geom_bar() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = f_property_type, y = log_price)) + geom_boxplot()
+p4 <- ggplot(data= kensington_chelsea, aes(x = f_property_type, y = log_price)) + geom_boxplot()
 
-#f_property_type --> some interaction with other variables, eg. room type?
-ggplot(data= london, aes(x = f_property_type)) + geom_bar()
-ggplot(data= london, aes(x = f_property_type, y = log_price)) + geom_boxplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
-# usd_cleaning_fee --> model non-linearity?
-ggplot(data= london, aes(x = cleaning_fee)) + geom_histogram()
-ggplot(data= london, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
+# some interaction with other variables, eg. room type?
+```
 
+cleaning_fee:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = cleaning_fee)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = cleaning_fee)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
 
-# d_total
-ggplot(data= london, aes(x = d_total)) + geom_histogram()
-ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+
+##usd_cleaning_fees --> model non-linearity?
+```  
+
+I'm sure people will be happy to pay more for a nice breakfast:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = factor(d_breakfast))) + geom_bar() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = factor(d_breakfast))) + geom_bar() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = factor(d_breakfast), y = log_price)) + geom_boxplot()
+p4 <- ggplot(data= kensington_chelsea, aes(x = factor(d_breakfast), y = log_price)) + geom_boxplot()
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```  
+Well, maybe not so much...  
+What about other features?  
+  
+Looking at the earlier created feature-score, d_total, we will see a slight positive impact:
+```{r, echo= FALSE, fig.width= 15}
+p1 <- ggplot(data= london, aes(x = d_total)) + geom_histogram() + labs(title= "Full London")
+p2 <- ggplot(data= kensington_chelsea, aes(x = d_total)) + geom_histogram() + labs(title= "Kensington and Chelsea")
+p3 <- ggplot(data= london, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
+p4 <- ggplot(data= kensington_chelsea, aes(x = d_total, y = log_price)) + geom_point() + geom_smooth()
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```
 
 #### Creating a hold-out test set
@@ -294,11 +381,11 @@ model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bath
 ```
 
 ```{r}
-#simple model - using multiple predictor variables
+#complex model
 
 set.seed(93) #for reproducibility
-model_3_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms + 
-                          f_property_type + f_room_type + f_bed_type, 
+model_3_london <- train(log_price ~ n_accommodates + n_accommodates_sq + n_beds + n_beds_sq + n_bathrooms + 
+                          cleaning_fee + cleaning_fee_sq + f_property_type + f_room_type + f_bed_type + d_total, 
                    data = london_train, 
                    method = "lm", 
                    trControl = fit_control)
@@ -307,8 +394,9 @@ model_3_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
 ```{r, include= FALSE}
 
 set.seed(93) #for reproducibility
-model_3_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bathrooms +
-                                            f_property_type + f_room_type + f_bed_type, 
+model_3_kensington_chelsea <- train(log_price ~ n_accommodates + n_accommodates_sq + n_beds + n_beds_sq +
+                                      n_bathrooms + cleaning_fee + cleaning_fee_sq + f_property_type + 
+                                      f_room_type + f_bed_type + d_total, 
                                           data = kensington_chelsea_train, 
                                           method = "lm",
                                           trControl = fit_control)
@@ -363,7 +451,7 @@ model_4_kensington_chelsea <- train(log_price ~ . -price -d_total -f_neighbourho
 #### Selecting the best model
 
 RMSE values from the different models are below:
-```{r, echo= FALSE, fig.align='center', fig.width=10, fig.height=5}
+```{r, echo= FALSE, fig.align= 'center', fig.width= 7.5, fig.height= 5}
 model_1_london_rmse_cv <- model_1_london$results[["RMSE"]]
 model_2_london_rmse_cv <- model_2_london$results[["RMSE"]]
 model_3_london_rmse_cv <- model_3_london$results[["RMSE"]]
@@ -381,6 +469,7 @@ m_logrmse <- matrix(c(1, model_1_london_rmse_cv, model_1_kensington_chelsea_rmse
                  nrow= 4, byrow= TRUE)
 colnames(m_logrmse) <- c('model', 'London RMSE', "Kensington and Chelsea RMSE")
 logrmse.table <- data.table(m_logrmse)
+
 ggplot(data= logrmse.table) +
   geom_point(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity") +
   geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity") +
@@ -424,7 +513,7 @@ model_1_london_rmse_uncorr_train <- RMSE(model_1_london_pred$`Uncorrected Predic
 model_1_london_rmse_train <- RMSE(model_1_london_pred$`Prediction`, london_train$price)
 ```
 
-To save ink-space, the coden for the other 7 model is not shown, but the exact same logic is applied to those as well to calculate RMSEs.
+To save ink-space, the code for the other 7 model is not shown, but the exact same logic is applied to those as well to calculate RMSEs.
 
 ```{r echo= FALSE}
 #1
@@ -475,11 +564,14 @@ m_rmse_uncorr.table <- data.table(m_rmse_uncorr)
 p1 <- ggplot(data= m_rmse_uncorr.table) +
   geom_point(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 3) +
   geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 1.5) +
+  geom_label(aes(x= model, y= as.numeric(`London RMSE`), label= round(as.numeric(`London RMSE`),2)), hjust= 0, vjust= 0) +
   geom_point(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 3) +
   geom_line(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 1.5) +
+  geom_label(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), label= round(as.numeric(`Kensington and Chelsea RMSE`),2)), hjust= 0, vjust= 0) +
   labs(y = "RMSE of uncorrected predictions", x = "Model", title= "RMSE values of uncorrected level-prediction,\nafter cross-validation, training sample") +
   theme(legend.position="none")
 
+#corrected rmse
 m_rmse <- matrix(c(1, model_1_london_rmse_train, model_1_kensington_chelsea_rmse_train, 
                    2, model_2_london_rmse_train, model_2_kensington_chelsea_rmse_train, 
                    3, model_3_london_rmse_train, model_3_kensington_chelsea_rmse_train, 
@@ -504,6 +596,53 @@ p2 <- ggplot(data= m_rmse.table) +
 grid.arrange(p1, p2, ncol = 2)
 ```
 
+So far it looks like that the predictions made by the most complex model, tuned with LASSO regularization yields the best results. Given the only thing we are after is good prediction, I am picking this model as the best performing one, based on RMSE criteria as a metric of performance.
+
+The only step remaining regarding validation of results is checking if the predictions look well-calibrated - meaning that broken to smaller groups, the avg. predicted values should align with average actuals.  
+  
+Let's see if this is true on the below plots:
+```{r, echo= FALSE, fig.align='center', fig.width= 15, fig.height= 4}
+actual_vs_predicted <- data.table(actual = london_train$price,
+                                  predicted = model_4_london_pred$`Prediction`)
+
+actual_vs_predicted[, category := cut(predicted,
+                                    seq(0, 150, 25),
+                                    include.lowest = TRUE)]
+calibration <- actual_vs_predicted[, .(mean_actual = mean(actual),
+                                       mean_predicted = mean(predicted),
+                                       num_obs = .N),
+                                   keyby = .(category)]
+p1<- ggplot(calibration,
+       aes(x = mean_actual, y = mean_predicted, size = num_obs)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  ylim(0, 250) + xlim(0, 250) +
+  labs(title = "Calibration of predictions - Full London", subtitle= "Comparison of mean predicted and actual prices by groups")
+
+#
+actual_vs_predicted <- data.table(actual = kensington_chelsea_train$price,
+                                  predicted = model_4_kensington_chelsea_pred$`Prediction`)
+
+actual_vs_predicted[, category := cut(predicted,
+                                    seq(0, 150, 25),
+                                    include.lowest = TRUE)]
+calibration <- actual_vs_predicted[, .(mean_actual = mean(actual),
+                                       mean_predicted = mean(predicted),
+                                       num_obs = .N),
+                                   keyby = .(category)]
+p2 <- ggplot(calibration,
+       aes(x = mean_actual, y = mean_predicted, size = num_obs)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  ylim(0, 250) + xlim(0, 250) +
+  labs(title = "Calibration of predictions - Kensington and Chelsea", subtitle= "Comparison of mean predicted and actual prices by groups")
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+Apart from a small difference on the last group, our model looks nicely calibrated.  
+For this group, if we think about the price distribution, we can recall that there are some values long lying from others - we have a right-skewed distribution of prices.  
+For such prices with not many observations, fitting a linear model would hurt general fit for more dense price ranges - hence it can be concluded that the highest-prices' group being a bit off is rather a feature of the model, thana bug.
 
 
 #### Evaluating the best model
