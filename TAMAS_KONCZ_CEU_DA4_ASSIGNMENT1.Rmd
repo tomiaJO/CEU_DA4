@@ -647,8 +647,14 @@ For such prices with not many observations, fitting a linear model would hurt ge
 
 #### Evaluating the best model
 After evaluating the different models based on different criteria, and selecting the best ones, let's see how they perform on the held-out test set:
-```{r}
-#TODO
+```{r, echo= FALSE}
+model_4_london_pred_test <- predictions_calc(model_4_london, london_test)
+model_4_london_rmse_uncorr_test <- RMSE(model_4_london_pred_test$`Uncorrected Prediction`, london_test$price)
+model_4_london_rmse_test <- RMSE(model_4_london_pred_test$`Prediction`, london_test$price)
+
+model_4_kensington_chelsea_pred_test <- predictions_calc(model_4_kensington_chelsea, kensington_chelsea_test)
+model_4_kensington_chelsea_rmse_uncorr_test <- RMSE(model_4_kensington_chelsea_pred_test$`Uncorrected Prediction`, kensington_chelsea_test$price)
+model_4_kensington_chelsea_rmse_uncorr_test <- RMSE(model_4_kensington_chelsea_pred_test$`Prediction`, kensington_chelsea_test$price)
 ```
 
 
