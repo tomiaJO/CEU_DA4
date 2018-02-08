@@ -21,6 +21,7 @@ theme_set(theme_minimal())   # globally set ggplot theme
 
 set.seed(1234)
 RMSE <- function(x, true_x) sqrt(mean((x - true_x)^2))
+ERR_SQ <- function(x, true_x) (x - true_x)^2
 ```
 
 
@@ -385,31 +386,122 @@ ggplot(data= logrmse.table) +
   geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity") +
   geom_point(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity") +
   geom_line(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity") +
-  labs(y = "RMSE of log predictions", x = "Model", title= "RMSE values after cross-validation, training sample") +
+  labs(y = "RMSE of log predictions", x = "Model", title= "RMSE values of log-prediction, after cross-validation, training sample") +
   theme(legend.position=c(1, 1), 
         legend.title=element_blank(),
         legend.background = element_rect(fill="white", size=0.5, linetype="solid"))
 ```
 However, these are RMSE-s of the log_price predictions - while we are after predicting the actual prices. Let's fix this.  
 
-As the first step, we'll make predictions on the trainings set with all our models. Reference for these predictions can be found here: https://stackoverflow.com/questions/31629673/determine-predictors-in-a-model-generated-with-caret-package.
+As the first step, we'll make predictions on the trainings set with all our models. Reference for how to calculate these predictions predictions can be found here: https://www.r-bloggers.com/forecasting-from-log-linear-regressions/.  
+  
+  
+Implementations is via the below code, which calculated the log, uncorrected level, and corrected level predictions for a given model on a given dataset:
 ```{r}
-model_1_london_log_pred <- predict(model_1_london)
-n <- london_train[,.N]
-k <- length(predictors(model_2_london))
-model_1_london_s2 <- RMSE(model_1_london_log_pred, 
-                          london_train$log_price) / (n-k)
-
+predictions_calc <- function(model, dt) {
+  log_pred <- predict(model, dt)
+  n <- dt[,.N]
+  k <- length(predictors(model))
+  s2 <- sum((log_pred - dt$log_price)^2) / (n-k)
+  
+  log_pred <- data.table(log_pred)
+  pred_uncorrected <- data.table(exp(log_pred))
+  pred <- data.table(exp(log_pred + s2 / 2))
+  
+  dt_pred <- cbind(log_pred, pred_uncorrected, pred)
+  setnames(dt_pred, c("Log Prediction", "Uncorrected Prediction", "Prediction"))
+  
+  return(dt_pred)
+}
 ```
 
-And then convert these back to normal prices (not the correction term for log(...)!):
+
+Calculating RMSE based on the level predictions (both the uncorrected and the corrected):
 ```{r}
-## TODO
+model_1_london_pred <- predictions_calc(model_1_london, london_train)
+
+model_1_london_rmse_uncorr_train <- RMSE(model_1_london_pred$`Uncorrected Prediction`, london_train$price)
+model_1_london_rmse_train <- RMSE(model_1_london_pred$`Prediction`, london_train$price)
 ```
 
-And now we can check these results against the observed price information:
-```{r}
-## TODO
+To save ink-space, the coden for the other 7 model is not shown, but the exact same logic is applied to those as well to calculate RMSEs.
+
+```{r echo= FALSE}
+#1
+model_1_kensington_chelsea_pred <- predictions_calc(model_1_kensington_chelsea, kensington_chelsea_train)
+model_1_kensington_chelsea_rmse_uncorr_train <- RMSE(model_1_kensington_chelsea_pred$`Uncorrected Prediction`, kensington_chelsea_train$price)
+model_1_kensington_chelsea_rmse_train <- RMSE(model_1_kensington_chelsea_pred$`Prediction`, kensington_chelsea_train$price)
+
+#2
+model_2_london_pred <- predictions_calc(model_2_london, london_train)
+model_2_london_rmse_uncorr_train <- RMSE(model_2_london_pred$`Uncorrected Prediction`, london_train$price)
+model_2_london_rmse_train <- RMSE(model_2_london_pred$`Prediction`, london_train$price)
+
+model_2_kensington_chelsea_pred <- predictions_calc(model_2_kensington_chelsea, kensington_chelsea_train)
+model_2_kensington_chelsea_rmse_uncorr_train <- RMSE(model_2_kensington_chelsea_pred$`Uncorrected Prediction`, kensington_chelsea_train$price)
+model_2_kensington_chelsea_rmse_train <- RMSE(model_2_kensington_chelsea_pred$`Prediction`, kensington_chelsea_train$price)
+
+#3
+model_3_london_pred <- predictions_calc(model_3_london, london_train)
+model_3_london_rmse_uncorr_train <- RMSE(model_3_london_pred$`Uncorrected Prediction`, london_train$price)
+model_3_london_rmse_train <- RMSE(model_3_london_pred$`Prediction`, london_train$price)
+
+model_3_kensington_chelsea_pred <- predictions_calc(model_3_kensington_chelsea, kensington_chelsea_train)
+model_3_kensington_chelsea_rmse_uncorr_train <- RMSE(model_3_kensington_chelsea_pred$`Uncorrected Prediction`, kensington_chelsea_train$price)
+model_3_kensington_chelsea_rmse_train <- RMSE(model_3_kensington_chelsea_pred$`Prediction`, kensington_chelsea_train$price)
+
+#4
+model_4_london_pred <- predictions_calc(model_4_london, london_train)
+model_4_london_rmse_uncorr_train <- RMSE(model_4_london_pred$`Uncorrected Prediction`, london_train$price)
+model_4_london_rmse_train <- RMSE(model_4_london_pred$`Prediction`, london_train$price)
+
+model_4_kensington_chelsea_pred <- predictions_calc(model_4_kensington_chelsea, kensington_chelsea_train)
+model_4_kensington_chelsea_rmse_uncorr_train <- RMSE(model_4_kensington_chelsea_pred$`Uncorrected Prediction`, kensington_chelsea_train$price)
+model_4_kensington_chelsea_rmse_train <- RMSE(model_4_kensington_chelsea_pred$`Prediction`, kensington_chelsea_train$price)
+```
+
+
+Let's visualize the results to facilitate our selection of the best model:
+```{r, echo=FALSE, fig.width= 15}
+m_rmse_uncorr <- matrix(c(1, model_1_london_rmse_uncorr_train, model_1_kensington_chelsea_rmse_uncorr_train, 
+                   2, model_2_london_rmse_uncorr_train, model_2_kensington_chelsea_rmse_uncorr_train, 
+                   3, model_3_london_rmse_uncorr_train, model_3_kensington_chelsea_rmse_uncorr_train, 
+                   4, model_4_london_rmse_uncorr_train, model_4_kensington_chelsea_rmse_uncorr_train), 
+                 nrow= 4, byrow= TRUE)
+
+
+colnames(m_rmse_uncorr) <- c('model', 'London RMSE', "Kensington and Chelsea RMSE")
+m_rmse_uncorr.table <- data.table(m_rmse_uncorr)
+p1 <- ggplot(data= m_rmse_uncorr.table) +
+  geom_point(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 3) +
+  geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 1.5) +
+  geom_point(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 3) +
+  geom_line(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 1.5) +
+  labs(y = "RMSE of uncorrected predictions", x = "Model", title= "RMSE values of uncorrected level-prediction,\nafter cross-validation, training sample") +
+  theme(legend.position="none")
+
+m_rmse <- matrix(c(1, model_1_london_rmse_train, model_1_kensington_chelsea_rmse_train, 
+                   2, model_2_london_rmse_train, model_2_kensington_chelsea_rmse_train, 
+                   3, model_3_london_rmse_train, model_3_kensington_chelsea_rmse_train, 
+                   4, model_4_london_rmse_train, model_4_kensington_chelsea_rmse_train), 
+                 nrow= 4, byrow= TRUE)
+
+
+colnames(m_rmse) <- c('model', 'London RMSE', "Kensington and Chelsea RMSE")
+m_rmse.table <- data.table(m_rmse)
+p2 <- ggplot(data= m_rmse.table) +
+  geom_point(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 3) +
+  geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity", size= 1.5) +
+  geom_label(aes(x= model, y= as.numeric(`London RMSE`), label= round(as.numeric(`London RMSE`),2)), hjust= 0, vjust= 0) +
+  geom_point(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 3) +
+  geom_line(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity", size= 1.5) +
+  geom_label(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), label= round(as.numeric(`Kensington and Chelsea RMSE`),2)), hjust= 0, vjust= 0) +
+  labs(y = "RMSE of predictions", x = "Model", title= "RMSE values of level-prediction,\nafter cross-validation, training sample") +
+  theme(legend.position=c(1, 1), 
+        legend.title=element_blank(),
+        legend.background = element_rect(fill="white", size=0.5, linetype="solid"))
+
+grid.arrange(p1, p2, ncol = 2)
 ```
 
 
