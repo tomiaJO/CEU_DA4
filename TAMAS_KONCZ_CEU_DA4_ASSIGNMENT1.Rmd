@@ -362,22 +362,44 @@ model_4_kensington_chelsea <- train(log_price ~ . -price -d_total -f_neighbourho
 #### Selecting the best model
 
 RMSE values from the different models are below:
-```{r}
+```{r, echo= FALSE, fig.align='center', fig.width=10, fig.height=5}
 model_1_london_rmse_cv <- model_1_london$results[["RMSE"]]
 model_2_london_rmse_cv <- model_2_london$results[["RMSE"]]
 model_3_london_rmse_cv <- model_3_london$results[["RMSE"]]
-model_4_london_rmse_cv <- model_4_london$results[["RMSE"]]
+model_4_london_rmse_cv <- min(model_4_london$results[["RMSE"]])
 
 model_1_kensington_chelsea_rmse_cv <- model_1_kensington_chelsea$results[["RMSE"]]
 model_2_kensington_chelsea_rmse_cv <- model_2_kensington_chelsea$results[["RMSE"]]
 model_3_kensington_chelsea_rmse_cv <- model_3_kensington_chelsea$results[["RMSE"]]
-model_4_kensington_chelsea_rmse_cv <- model_4_kensington_chelsea$results[["RMSE"]]
+model_4_kensington_chelsea_rmse_cv <- min(model_4_kensington_chelsea$results[["RMSE"]])
+
+m_logrmse <- matrix(c(1, model_1_london_rmse_cv, model_1_kensington_chelsea_rmse_cv,
+                   2, model_2_london_rmse_cv, model_2_kensington_chelsea_rmse_cv,
+                   3, model_3_london_rmse_cv, model_3_kensington_chelsea_rmse_cv,
+                   4, model_4_london_rmse_cv, model_4_kensington_chelsea_rmse_cv), 
+                 nrow= 4, byrow= TRUE)
+colnames(m_logrmse) <- c('model', 'London RMSE', "Kensington and Chelsea RMSE")
+logrmse.table <- data.table(m_logrmse)
+ggplot(data= logrmse.table) +
+  geom_point(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity") +
+  geom_line(aes(x= model, y= as.numeric(`London RMSE`), color= "London"), stat="identity") +
+  geom_point(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity") +
+  geom_line(aes(x= model, y= as.numeric(`Kensington and Chelsea RMSE`), color= "Kensington and Chelsea"), stat="identity") +
+  labs(y = "RMSE of log predictions", x = "Model", title= "RMSE values after cross-validation, training sample") +
+  theme(legend.position=c(1, 1), 
+        legend.title=element_blank(),
+        legend.background = element_rect(fill="white", size=0.5, linetype="solid"))
 ```
 However, these are RMSE-s of the log_price predictions - while we are after predicting the actual prices. Let's fix this.  
 
-As the first step, we'll make predictions on the trainings set with all our models:
+As the first step, we'll make predictions on the trainings set with all our models. Reference for these predictions can be found here: https://stackoverflow.com/questions/31629673/determine-predictors-in-a-model-generated-with-caret-package.
 ```{r}
-## TODO
+model_1_london_log_pred <- predict(model_1_london)
+n <- london_train[,.N]
+k <- length(predictors(model_2_london))
+model_1_london_s2 <- RMSE(model_1_london_log_pred, 
+                          london_train$log_price) / (n-k)
+
 ```
 
 And then convert these back to normal prices (not the correction term for log(...)!):
