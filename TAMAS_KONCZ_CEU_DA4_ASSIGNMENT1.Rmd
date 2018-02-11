@@ -3,6 +3,7 @@ title: "DA4 -  Assignment 1"
 author: "Tamas Koncz"
 date: '2018-02-11'
 output:
+  pdf_document: default
   html_notebook:
     df_print: paged
   html_document:
@@ -155,7 +156,7 @@ This is a very simple approach, without any weightings on different benefits - h
 london[, d_total := Reduce("+", .SD), .SDcols = names(london) %like% "^d_.*"]
 ```
 
-For some variables, I've added second polinomial terms, for better fit. More explanation in the visual section to follow.
+For some variables, I've added second polinomial terms, for better fit. It will be visible in the next session that these variables bear a somewhat non-linear relationship to log(price).
 ```{r}
 london[, cleaning_fee_sq:= cleaning_fee^2]
 london[, n_accommodates_sq:= n_accommodates^2]
@@ -254,8 +255,6 @@ p3 <- ggplot(data= london, aes(x = n_minimum_nights, y = log_price)) + geom_poin
 p4 <- ggplot(data= kensington_chelsea, aes(x = n_minimum_nights, y = log_price)) + geom_point() + geom_smooth()
 
 grid.arrange(p1, p2, p3, p4, ncol = 2)
-
-##well this looks strange... transform to dummy?
 ```  
   
 f_cancellation_policy:
@@ -266,8 +265,6 @@ p3 <- ggplot(data= london, aes(x = f_property_type, y = log_price)) + geom_boxpl
 p4 <- ggplot(data= kensington_chelsea, aes(x = f_property_type, y = log_price)) + geom_boxplot()
 
 grid.arrange(p1, p2, p3, p4, ncol = 2)
-
-# some interaction with other variables, eg. room type?
 ```
 
 cleaning_fee:
@@ -278,8 +275,6 @@ p3 <- ggplot(data= london, aes(x = cleaning_fee, y = log_price)) + geom_point() 
 p4 <- ggplot(data= kensington_chelsea, aes(x = cleaning_fee, y = log_price)) + geom_point() + geom_smooth()
 
 grid.arrange(p1, p2, p3, p4, ncol = 2)
-
-##usd_cleaning_fees --> model non-linearity?
 ```  
 
 I'm sure people will be happy to pay more for a nice breakfast:
@@ -359,9 +354,13 @@ model_1_kensington_chelsea <- train(log_price ~ n_accommodates,
 ```
 
 
-```{r}
-#simple model - using multiple predictor variables
+The second model I'm going to train is somewhat more complicated, still linear, but using multiple regression.  
+The variables I've selected are based on what I think could be explanatory of price from the business perspective (e.g. an entire apartmant should be higher priced than just a room).  
+  
+It's importantto highlight one variable I'm not using, which is location information (borough).  
+This is just because my interpretation of the task, to be able to use the exact same models for full London and the subsample (so for Full London, this might not be optimal for prediction power, in a project with actual dollar-impact my decision would have been obviously different).  
 
+```{r}
 set.seed(93) #for reproducibility
 model_2_london <- train(log_price ~ n_accommodates + n_beds + n_bathrooms + 
                           f_property_type + f_room_type + f_bed_type, 
@@ -379,6 +378,11 @@ model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bath
                                           method = "lm",
                                           trControl = fit_control)
 ```
+
+The third model is a "one step further" version of the previous one.  
+Two important differences are:  
+    a. adding second polynomial terms for some variables, where the relationship to price is expected to be non-linear
+    b. use of "d_total", which is the unweighted score created previously for all the feature-dummies
 
 ```{r}
 #complex model
@@ -402,14 +406,17 @@ model_3_kensington_chelsea <- train(log_price ~ n_accommodates + n_accommodates_
                                           trControl = fit_control)
 ```
 
-
+Finally, the last model will use all variables that can be input to both dataset (some had to be filtered out, as they take only one level in the subsample).   
+Generally speaking, using all variables, with this many being available, could risk overfitting the parameters.  
+To control for this, I'm using LASSO-regularization - a technique that essentially penalizes coefficients getting to large in the model, making it less likely to overfit.  
+  
 Setting up LASSO, and hyperparameter-tuning with Caret:  
 ```{r}
 tune_grid <- expand.grid("alpha" = 1,
                              "lambda" = seq(0, 0.015, 0.001))
 ```
 
-
+    
 ```{r, include= FALSE}
 l <- sapply(kensington_chelsea_train, function(x) is.factor(x))
 m <- kensington_chelsea_train[, ..l]
@@ -420,6 +427,8 @@ rm(l)
 rm(m)
 ```
 
+  
+And then calling the train function:    
 
 ```{r}
 #full model - most complexity, all variables
@@ -654,10 +663,48 @@ model_4_london_rmse_test <- RMSE(model_4_london_pred_test$`Prediction`, london_t
 
 model_4_kensington_chelsea_pred_test <- predictions_calc(model_4_kensington_chelsea, kensington_chelsea_test)
 model_4_kensington_chelsea_rmse_uncorr_test <- RMSE(model_4_kensington_chelsea_pred_test$`Uncorrected Prediction`, kensington_chelsea_test$price)
-model_4_kensington_chelsea_rmse_uncorr_test <- RMSE(model_4_kensington_chelsea_pred_test$`Prediction`, kensington_chelsea_test$price)
+model_4_kensington_chelsea_rmse_test <- RMSE(model_4_kensington_chelsea_pred_test$`Prediction`, kensington_chelsea_test$price)
+
+m_rmse_test <- matrix(c("Uncorrected", model_4_london_rmse_uncorr_test, model_4_kensington_chelsea_rmse_uncorr_test, 
+                   "corrected", model_4_london_rmse_test, model_4_kensington_chelsea_rmse_test), 
+                 nrow= 2, byrow= TRUE)
+
+
+colnames(m_rmse_test) <- c('prediction', 'London RMSE', "Kensington and Chelsea RMSE")
+data.table(m_rmse_test)
 ```
 
+Given the above RMSE-s are looking somewhat large, I had to think whether the model is actually bad.  
+Let's remember the calibration pot - we could already see that really larger prices were off a bit.  
+This should be no surprise - it is really hard to predict tail values, which are extreme in value, but happen with a rare frequency.  
+At the start I've made a choice of building the model on prices available - in this case, that might not be the best decision if we are really concerned with making the best predictions. (One way of getting around this problem could be building separate models for "normal" and "high prices", which might be prone to completely different dynamics)  
+  
+We can still chech the RMSE value if we only calculate it for limited observations, like below:  
+
+```{r}
+x <- data.table(cbind(model_4_london_pred_test$`Prediction`, london_test$price))
+setnames(x, c("prediction", "price"))
+x <- x[price<500, ]
+
+RMSE(x$prediction,x$price)
+```
+
+The difference is significant - so we can conclude that the model is not actually bad at making predictions, it just can't handle the more extreme values, due to it's linear structure.
 
 #### London prices 2018
 
+So far we tested the model in the data we already have. Creating the best model to predict our existing data is obviously not the goal - why would we predict something we know, after all.  
+Here, we turn to the question of external validity - we want to pick the model, which will best predict prices that are not yet known. There are factors that might change between our dataset, and what will happen in 2018 (let's just mention one: BrExit is continuing with full throttle), which is not captured by the variables in our model.  
+Generally, one thing we can do in these cases is make the model less complex (if we can't capture all impacting variables). Basically, by doing this, we give way to a little bias possibly (we are not making the best predictions we could), in exchange for less variance. Or, with other words, we sacrafice precision, hoping to gain accuracy - a good deal most likely.  
+  
+Does this problem apply here? Should we chose something other than the most complex model, which had the best prediction power? My answer is a mix of no and a maybe. I'm by no means an expert in the dynamics of London's accomodation market, so I'm not going to take a side here. But if there is reason to believe that something will be fundamentally different in 2018, then go with a simpler model (maybe model 3 or even 2). If the outlook is not changing based on expert judgment, then I think all the work we did to avoid overfitting (CV, LASSO) should give us enoguh confidence to apply the most complex model.  
+
 #### Budapest prices 2018
+  
+Here, we take a step even further - we don't just move in the future in terms of the time dimension, but also we want to predict for a different location (one reason I left out the borough as a predictor, is that at least theoretically the model could work for Budapest this way).  
+  
+So, what change? Well, a lot - what differentiates pricing in London could be totally different from what factors are important in Budapest. Just think about it - Budapest is a cheap location for most Westerners, and they come in all different shapes and sizes, but most likely come either for the sights, or for the nightlife. Many our young people looking to have fun at a reasonable price. Now think about London, one of the World's most expensive cities, with a much different city size, infrastructure, etc.  
+
+This might be the exact case when less is more, addition by subtraction. If we apply a complex model, then it will capture the pricing dynamics likely in detail - which is not a good thing if the dynamics are different in London and Budapest. I'd choose a much less complex model (either the second or maybe the third) for this purpose - one, that I built based on my (limited) understanding of what could decide prices in general, factors that are likely the same all around the World.  
+  
+What I'm hoping to achieve with this is simple: rather than creating a false illusion of precision, let's accept that we won't be able to use this model to get very exact prices, and be satisfied with just separating general price levels from each other.
