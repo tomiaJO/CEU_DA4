@@ -3,11 +3,11 @@ title: "DA4 -  Assignment 1"
 author: "Tamas Koncz"
 date: '2018-02-11'
 output:
-  pdf_document: default
-  html_notebook:
-    df_print: paged
   html_document:
     df_print: paged
+  html_notebook:
+    df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, message=FALSE, include=FALSE}
@@ -334,7 +334,7 @@ fit_control <- trainControl(method = "cv", number = 10)
 
 #### Model training
 
-I'm fitting four separte models - they share the same predictors and train(...) parameters. Hence, I'll only include code for the whole London dataset - what happens for the subsample is analogous.  
+I'm fitting four models, twice each time - they share the same predictors and train(...) parameters. Hence, I'll only include code for the whole London dataset - what happens for the subsample is analogous each time.  
   
 The first model is very basic - it just uses one predictor, n_accommodates. It is expected to be used rather as a benchmark, than an actual model for prediction.
 ```{r}
@@ -357,8 +357,8 @@ model_1_kensington_chelsea <- train(log_price ~ n_accommodates,
 The second model I'm going to train is somewhat more complicated, still linear, but using multiple regression.  
 The variables I've selected are based on what I think could be explanatory of price from the business perspective (e.g. an entire apartmant should be higher priced than just a room).  
   
-It's importantto highlight one variable I'm not using, which is location information (borough).  
-This is just because my interpretation of the task, to be able to use the exact same models for full London and the subsample (so for Full London, this might not be optimal for prediction power, in a project with actual dollar-impact my decision would have been obviously different).  
+It's important to highlight one variable I'm not using, which is location information (borough).  
+This is just because my interpretation of the task, to be able to use the exact same models for full London and the subsample (so for Full London, this might not be optimal for prediction power - in a project with actual dollar-impact my decision would have been obviously different).  
 
 ```{r}
 set.seed(93) #for reproducibility
@@ -378,7 +378,9 @@ model_2_kensington_chelsea <- train(log_price ~ n_accommodates + n_beds + n_bath
                                           method = "lm",
                                           trControl = fit_control)
 ```
-
+  
+  
+  
 The third model is a "one step further" version of the previous one.  
 Two important differences are:  
     a. adding second polynomial terms for some variables, where the relationship to price is expected to be non-linear
@@ -408,7 +410,7 @@ model_3_kensington_chelsea <- train(log_price ~ n_accommodates + n_accommodates_
 
 Finally, the last model will use all variables that can be input to both dataset (some had to be filtered out, as they take only one level in the subsample).   
 Generally speaking, using all variables, with this many being available, could risk overfitting the parameters.  
-To control for this, I'm using LASSO-regularization - a technique that essentially penalizes coefficients getting to large in the model, making it less likely to overfit.  
+To control for this, I'm using LASSO-regularization - a technique that essentially penalizes coefficients getting too large in the model, making the model less likely to overfit.  
   
 Setting up LASSO, and hyperparameter-tuning with Caret:  
 ```{r}
@@ -494,7 +496,7 @@ However, these are RMSE-s of the log_price predictions - while we are after pred
 As the first step, we'll make predictions on the trainings set with all our models. Reference for how to calculate these predictions predictions can be found here: https://www.r-bloggers.com/forecasting-from-log-linear-regressions/.  
   
   
-Implementations is via the below code, which calculated the log, uncorrected level, and corrected level predictions for a given model on a given dataset:
+Implementations is via the below code, which calculates the log, uncorrected level, and corrected level predictions for a given model on a given dataset:
 ```{r}
 predictions_calc <- function(model, dt) {
   log_pred <- predict(model, dt)
@@ -650,11 +652,13 @@ grid.arrange(p1, p2, ncol = 2)
 ```
 
 Apart from a small difference on the last group, our model looks nicely calibrated.  
-For this group, if we think about the price distribution, we can recall that there are some values long lying from others - we have a right-skewed distribution of prices.  
-For such prices with not many observations, fitting a linear model would hurt general fit for more dense price ranges - hence it can be concluded that the highest-prices' group being a bit off is rather a feature of the model, thana bug.
+For this group, if we think about the price distribution, we can recall that there are some values lying long apart from others - we have a right-skewed distribution of prices.  
+For such prices with not many observations, fitting a linear model would hurt general fit for more dense price ranges - hence it can be concluded that the highest-prices' group being a bit off is rather a feature of the model, than a bug.
 
 
-#### Evaluating the best model
+#### Evaluating the best model  
+  
+  
 After evaluating the different models based on different criteria, and selecting the best ones, let's see how they perform on the held-out test set:
 ```{r, echo= FALSE}
 model_4_london_pred_test <- predictions_calc(model_4_london, london_test)
@@ -673,13 +677,14 @@ m_rmse_test <- matrix(c("Uncorrected", model_4_london_rmse_uncorr_test, model_4_
 colnames(m_rmse_test) <- c('prediction', 'London RMSE', "Kensington and Chelsea RMSE")
 data.table(m_rmse_test)
 ```
-
+  
+  
 Given the above RMSE-s are looking somewhat large, I had to think whether the model is actually bad.  
-Let's remember the calibration pot - we could already see that really larger prices were off a bit.  
+Let's remember the calibration plot - we could already see that really larger prices were off a bit.  
 This should be no surprise - it is really hard to predict tail values, which are extreme in value, but happen with a rare frequency.  
 At the start I've made a choice of building the model on prices available - in this case, that might not be the best decision if we are really concerned with making the best predictions. (One way of getting around this problem could be building separate models for "normal" and "high prices", which might be prone to completely different dynamics)  
   
-We can still chech the RMSE value if we only calculate it for limited observations, like below:  
+We can still check the RMSE value if we only calculate it for limited observations, like below:  
 
 ```{r}
 x <- data.table(cbind(model_4_london_pred_test$`Prediction`, london_test$price))
@@ -693,11 +698,11 @@ The difference is significant - so we can conclude that the model is not actuall
 
 #### London prices 2018
 
-So far we tested the model in the data we already have. Creating the best model to predict our existing data is obviously not the goal - why would we predict something we know, after all.  
-Here, we turn to the question of external validity - we want to pick the model, which will best predict prices that are not yet known. There are factors that might change between our dataset, and what will happen in 2018 (let's just mention one: BrExit is continuing with full throttle), which is not captured by the variables in our model.  
+So far we tested the model in the data we already have. Creating the best model to predict our existing data is obviously not the goal - why would we predict something we already know, after all.  
+Here, we turn to the question of external validity - we want to pick the model, which will best predict prices that are not yet known. There are factors that might change between our dataset and what will happen in 2018 (let's just mention one: BrExit is continuing with full throttle), which is not captured by the variables in our model.  
 Generally, one thing we can do in these cases is make the model less complex (if we can't capture all impacting variables). Basically, by doing this, we give way to a little bias possibly (we are not making the best predictions we could), in exchange for less variance. Or, with other words, we sacrafice precision, hoping to gain accuracy - a good deal most likely.  
   
-Does this problem apply here? Should we chose something other than the most complex model, which had the best prediction power? My answer is a mix of no and a maybe. I'm by no means an expert in the dynamics of London's accomodation market, so I'm not going to take a side here. But if there is reason to believe that something will be fundamentally different in 2018, then go with a simpler model (maybe model 3 or even 2). If the outlook is not changing based on expert judgment, then I think all the work we did to avoid overfitting (CV, LASSO) should give us enoguh confidence to apply the most complex model.  
+Does this problem apply here? Should we chose something other than the most complex model, which had the best prediction power? My answer is a mix of no and a maybe. I'm by no means an expert in the dynamics of London's accomodation market, so I'm not going to take a side here. But if there is reason to believe that something will be fundamentally different in 2018, then go with a simpler model (maybe model 3 or even 2). If the outlook is not changing based on expert judgment, then I think all the work done to avoid overfitting (CV, LASSO) should give us enough confidence to apply the most complex model.  
 
 #### Budapest prices 2018
   
