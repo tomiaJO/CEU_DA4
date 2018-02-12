@@ -58,6 +58,9 @@ fun_count_na <- function(dt) {
 Look at missing values in the dataset:
 ```{r}
 fun_count_na(data)
+
+# v<-dcast(data[, c("comp_id", "year")], comp_id ~ year)
+# v[,.N]
 ```
   
 Removing observations where curr_assets (or curr_liab) is missing:
@@ -83,12 +86,15 @@ data[sales == 0, .N]
 
 ```{r}
 p1 <- ggplot(data= data, aes(x= log(curr_liab))) + geom_density()
-p2 <- ggplot(data= data, aes(x= log(curr_assets))) + geom_histogram()
+p2 <- ggplot(data= data, aes(x= log(curr_assets))) + geom_density()
 
 grid.arrange(p1, p2, ncol = 2)
+
+rm(p1)
+rm(p2)
 ```
 
-```{r}
+```{r, echo= FALSE}
 data <- data[, .(comp_id, 
                   year= year, 
                   curr_liab= curr_liab,
@@ -96,14 +102,14 @@ data <- data[, .(comp_id,
                   curr_sales= sales,
                   founded_year = founded_year)]
 
-data_prev <- data[,.(comp_id, 
+data_prev <- data[year < 2016,.(comp_id, 
                      year= year + 1, 
                      prev_liab= curr_liab,
                      prev_assets= curr_assets,
                      prev_sales= curr_sales,
                      prev_founded_year = founded_year)]
 
-data_prev2 <- data[,.(comp_id, 
+data_prev2 <- data[year < 2015,.(comp_id, 
                      year= year + 2, 
                      prev_2_liab= curr_liab,
                      prev_2_assets= curr_assets,
@@ -112,11 +118,15 @@ data_prev2 <- data[,.(comp_id,
 data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = TRUE) #all.x --> fine with missing T-2 data
 
 
-dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.y = TRUE)
+dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all = TRUE)
 
-dt <- dt[year != 2012 &
-          year != 2013 &
-          year != 2017]
+dt <- dt[year != 2011 &
+          year != 2012 &
+          year != 2016]
+
+rm(data)
+rm(data_prev)
+rm(data_prev2)
 ```
 
 ```{r, include= FALSE}
@@ -129,18 +139,55 @@ fun_replace_na <- function(x) {
 ```{r}
 fun_count_na(dt)
 
+#fix founded_year
+dt[, is_new := ifelse(!is.na(founded_year) & is.na(prev_founded_year), 1, 0)]
+dt[, is_dropped := ifelse(is.na(founded_year) & !is.na(prev_founded_year), 1, 0)]
+dt[, founded_year := ifelse(is.na(founded_year), prev_founded_year, founded_year)]
+dt[, prev_founded_year := NULL]
+
+fun_count_na(dt)
+
 cols = names(dt)
-dt[, (cols) := lapply(fun_replace_na, .SD), .SDCols = cols] # change for founded year
+dt[, (cols) := lapply(.SD, fun_replace_na), .SDcols = cols] # change for founded year
+
+fun_count_na(dt)
 ```
 
 create the target variable, is_defaulted:
 ```{r}
-dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0), 
+dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) & 
+                              (curr_sales == 0 & prev_sales > 0), 
                             1, 0)]
 
-# dt[, .(.N, 
-#        sum(is_defaulted)), 
-#    keyby = year]
+#TODO: explain logic
+```
+
+Summary by year:
+```{r}
+dt[, .(count= .N,
+       default_count= sum(is_defaulted),
+       drop_count= sum(is_dropped),
+       new_count= sum(is_new)),
+   keyby = year]
+```
+
+Example of dropped but not defaulted by this logic:
+```{r}
+head(dt[is_dropped==1 & is_defaulted == 0])
+
+## does this make sense?
+```
+
+```{r}
+ggplot(data= dt, aes(x= factor(is_defaulted), y= log(curr_liab))) + geom_boxplot()
+ggplot(data= dt, aes(x= factor(is_defaulted), y= log(prev_liab))) + geom_boxplot()
+```
+
+```{r}
+dt[, liab_growth := ifelse(curr_liab>0 & prev_liab==0, 1, curr_liab/prev_liab)]
+
+ggplot(data= dt, aes(x= factor(is_defaulted), y= log(liab_growth))) + geom_boxplot()
+
 ```
 
 
