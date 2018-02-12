@@ -34,7 +34,7 @@ ERR_SQ <- function(x, true_x) (x - true_x)^2
 
 ```{r, include= FALSE}
 # rm(list=ls())
-# x <- fread("./Data/bisnode_all.csv",
+# x <- fread("./../Data/DA4/bisnode_all.csv",
 #               stringsAsFactors = FALSE)
 # 
 # print(skim(data))
@@ -44,12 +44,20 @@ ERR_SQ <- function(x, true_x) (x - true_x)^2
 data <- copy(x)
 ```
 
+```{r}
+fun_count_na <- function(dt) {
+  missing_values <- as.data.table(t(dt[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = names(dt)]),
+                                  keep.rownames = TRUE)
+  setnames(missing_values, c("variable", "NA.Count"))
+  
+  return(missing_values[order(-NA.Count)][NA.Count>0])
+}
+```
+
+
 Look at missing values in the dataset:
 ```{r}
-missing_values <- as.data.table(t(data[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = names(data)]), keep.rownames=TRUE)
-setnames(missing_values, c("variable", "NA.Count"))
-
-missing_values[order(-NA.Count)][NA.Count>0]
+fun_count_na(data)
 ```
   
 Removing observations where curr_assets (or curr_liab) is missing:
@@ -109,14 +117,30 @@ dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.y = TRUE)
 dt <- dt[year != 2012 &
           year != 2013 &
           year != 2017]
+```
 
-dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) & 
-                              (curr_sales == 0 & prev_sales > 0), 
+```{r, include= FALSE}
+fun_replace_na <- function(x) {
+  x <- ifelse(is.na(x), 0, x)
+  return(x)
+}
+```
+
+```{r}
+fun_count_na(dt)
+
+cols = names(dt)
+dt[, (cols) := lapply(fun_replace_na, .SD), .SDCols = cols] # change for founded year
+```
+
+create the target variable, is_defaulted:
+```{r}
+dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0), 
                             1, 0)]
 
-dt[, .(.N, 
-       sum(is_defaulted)), 
-   keyby = year]
+# dt[, .(.N, 
+#        sum(is_defaulted)), 
+#    keyby = year]
 ```
 
 
