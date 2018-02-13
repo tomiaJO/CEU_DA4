@@ -66,6 +66,8 @@ fun_count_na(data)
 Removing observations where curr_assets (or curr_liab) is missing:
 ```{r}
 data <- data[!is.na(curr_assets) && !is.na(curr_liab)]
+data <- data[!(is.na(ind) | ind == "")]
+data <- data[!(is.na(region_m) | region_m == "")]
 ```
   
   
@@ -100,15 +102,20 @@ data <- data[, .(comp_id,
                   curr_liab= curr_liab,
                   curr_assets= curr_assets,
                   curr_sales= sales,
-                  founded_year = founded_year)]
+                  founded_year = founded_year,
+                  industry = ind,
+                  region = region_m)]
 
 data_prev <- data[year < 2016,.(comp_id, 
                      year= year + 1, 
                      prev_liab= curr_liab,
                      prev_assets= curr_assets,
                      prev_sales= curr_sales,
-                     prev_founded_year = founded_year)]
+                     prev_founded_year = founded_year,
+                     prev_industry = industry,
+                     prev_region = region)]
 
+#only financials
 data_prev2 <- data[year < 2015,.(comp_id, 
                      year= year + 2, 
                      prev_2_liab= curr_liab,
@@ -120,6 +127,7 @@ data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all
 
 dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all = TRUE)
 
+#only use years where the full dataset is available generally
 dt <- dt[year != 2011 &
           year != 2012 &
           year != 2016]
@@ -136,14 +144,26 @@ fun_replace_na <- function(x) {
 }
 ```
 
+
+Some data handling:
 ```{r}
 fun_count_na(dt)
 
 #fix founded_year
 dt[, is_new := ifelse(!is.na(founded_year) & is.na(prev_founded_year), 1, 0)]
 dt[, is_dropped := ifelse(is.na(founded_year) & !is.na(prev_founded_year), 1, 0)]
+
 dt[, founded_year := ifelse(is.na(founded_year), prev_founded_year, founded_year)]
 dt[, prev_founded_year := NULL]
+
+dt[, industry := ifelse(is.na(industry), prev_industry, industry)]
+dt[, prev_industry := NULL]
+dt[industry %like% '*Manuf*', industry := "Manufacturing"] # recode & merge due to small number of observations
+dt[industry %like% '*hotel*', industry := "Leisure"]
+
+dt[, region := ifelse(is.na(region), prev_region, region)]
+dt[, prev_region := NULL]
+dt[, region := factor(region, levels= c("West", "Central", "East"))]
 
 fun_count_na(dt)
 
@@ -152,8 +172,13 @@ dt[, (cols) := lapply(.SD, fun_replace_na), .SDcols = cols] # change for founded
 
 fun_count_na(dt)
 ```
+  
+  
+[Definition for default](https://www.investopedia.com/terms/d/default2.asp): "... debtor is unable to meet the legal obligation of debt repayment...". Hence, the first requirement is to have some obligations to begin with.  
 
-create the target variable, is_defaulted:
+The definition of default for this exercise will follow the same logic: looking at companies who had any liabilities during a year, but their performance deteoriated significantly the next.
+
+Code to create the target variable, is_defaulted:
 ```{r}
 dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) & 
                               (curr_sales == 0 & prev_sales > 0), 
@@ -162,13 +187,32 @@ dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) &
 #TODO: explain logic
 ```
 
-Summary by year:
-```{r}
-dt[, .(count= .N,
+Summary by year (for reference, [here](https://www.ksh.hu/docs/hun/xftp/gyor/gaz/gaz1612.pdf) on p4 there is a table of "defaults" by industry):
+```{r, fig.align='center'}
+default_viz <- dt[, .(count= .N,
        default_count= sum(is_defaulted),
+       default_pct= sum(is_defaulted) / .N * 100,
        drop_count= sum(is_dropped),
        new_count= sum(is_new)),
-   keyby = year]
+   keyby = .(industry, region, year)]
+
+max_default_pct <- default_viz[, max(default_pct)]
+max_count <- default_viz[, max(count)]
+
+scaleFUN <- function(x) sprintf("%.2f", x)
+
+ggplot(data= default_viz) + 
+  geom_bar(aes(x= year, y= count, fill = "# of observations"), stat= "identity") +
+  geom_point(aes(x= year, y= default_pct * (max_count / max_default_pct), color = "% of defaults"), stat= "identity") +
+  geom_line(aes(x= year, y= default_pct * (max_count / max_default_pct), color = "% of defaults"), stat= "identity") +
+  facet_grid(industry ~ region) +
+  scale_y_continuous(sec.axis = sec_axis(~./(max_count/max_default_pct), name = "# of defaults", labels=scaleFUN), 
+                     labels = scales::comma) + 
+  scale_color_manual(name = "Legend", values = c("% of defaults" = "darkblue")) + 
+  scale_fill_manual(name = "Legend", values = c("# of observations" = "tomato")) + 
+  labs(y = "# of Observations", x = "Year")
+
+  ##TODO a nice chart ~ region/industry, by year, count vs default %
 ```
 
 Example of dropped but not defaulted by this logic:
@@ -183,7 +227,7 @@ ggplot(data= dt, aes(x= factor(is_defaulted), y= log(curr_liab))) + geom_boxplot
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(prev_liab))) + geom_boxplot()
 ```
 
-```{r}
+```{r, eval= FALSE}
 dt[, liab_growth := ifelse(curr_liab>0 & prev_liab==0, 1, curr_liab/prev_liab)]
 
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(liab_growth))) + geom_boxplot()
@@ -191,7 +235,7 @@ ggplot(data= dt, aes(x= factor(is_defaulted), y= log(liab_growth))) + geom_boxpl
 ```
 
 
-```{r}
+```{r, eval= FALSE}
 #prev liab vs curr liab
 ggplot(data = dt, aes(x= prev_liab, y= curr_liab)) + 
   geom_point(alpha=.1) + 
@@ -228,5 +272,3 @@ ggplot(data = dt, aes(x= curr_liab, y= curr_sales)) +
 ```
 
 
-[Definition for default](https://www.investopedia.com/terms/d/default2.asp): "... debtor is unable to meet the legal obligation of debt repayment...". Hence, the first requirement is to have some obligations to begin with.  
-The definition of default for this exercise will follow the same logic: looking at companies who had any liabilities during a year, but their performance deteoriated significantly the next.
