@@ -18,6 +18,8 @@ library(gridExtra)
 library(scales)
 
 library(caret)
+library(glmnet)
+library(ROCR)
 
 library(skimr)
 library(knitr)
@@ -206,13 +208,12 @@ ggplot(data= default_viz) +
   geom_point(aes(x= year, y= default_pct * (max_count / max_default_pct), color = "% of defaults"), stat= "identity") +
   geom_line(aes(x= year, y= default_pct * (max_count / max_default_pct), color = "% of defaults"), stat= "identity") +
   facet_grid(industry ~ region) +
-  scale_y_continuous(sec.axis = sec_axis(~./(max_count/max_default_pct), name = "# of defaults", labels=scaleFUN), 
+  scale_y_continuous(sec.axis = sec_axis(~./(max_count/max_default_pct), name = "% of defaults", labels=scaleFUN), 
                      labels = scales::comma) + 
   scale_color_manual(name = "Legend", values = c("% of defaults" = "darkblue")) + 
   scale_fill_manual(name = "Legend", values = c("# of observations" = "tomato")) + 
-  labs(y = "# of Observations", x = "Year")
-
-  ##TODO a nice chart ~ region/industry, by year, count vs default %
+  labs(y = "# of observations", x = "Year", 
+       title = "Visualizing all companies, with default rates", subtitle = "Breakdown by Region and Industry")
 ```
 
 Example of dropped but not defaulted by this logic:
@@ -222,7 +223,56 @@ head(dt[is_dropped==1 & is_defaulted == 0])
 ## does this make sense?
 ```
 
+
 ```{r}
+dt[, is_defaulted:= ifelse(is_defaulted==1, "Yes", "No")]
+dt[, is_defaulted := factor(is_defaulted, levels = c("Yes", "No"))]
+```
+
+
+```{r}
+training_ratio <- 0.7
+
+set.seed(93) #for reproducibility
+train_indices <- createDataPartition(y = dt[["is_defaulted"]],
+                                     times = 1,
+                                     p = training_ratio,
+                                     list = FALSE)
+data_train <- dt[train_indices, ]
+data_test <- dt[-train_indices, ]
+```
+
+```{r}
+train_control <- trainControl(method = "cv",
+                              number = 10,
+                              classProbs = TRUE)
+```
+
+
+
+```{r}
+set.seed(93)
+glm_model <- train(is_defaulted ~ year+industry+region+prev_liab+prev_assets+prev_2_liab+prev_2_assets,
+                   method = "glm",
+                   data = data_train,
+                   trControl = train_control)
+test_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
+test_truth <- data_test[["is_defaulted"]]
+```
+
+
+```{r}
+test_prediction_v2 <- ifelse(test_prediction_probs$Yes > 0.01, "Yes", "No")
+test_prediction_v2 <- factor(test_prediction_v2, levels = c("Yes", "No"))
+confusionMatrix(test_prediction_v2, test_truth)
+```
+
+
+
+
+APPENDIX
+
+```{r, eval= FALSE}
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(curr_liab))) + geom_boxplot()
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(prev_liab))) + geom_boxplot()
 ```
