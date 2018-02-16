@@ -16,6 +16,7 @@ library(data.table)
 library(ggplot2)
 library(gridExtra)
 library(scales)
+library(reshape)
 
 library(caret)
 library(glmnet)
@@ -67,7 +68,7 @@ fun_count_na(data)
   
 Removing observations where curr_assets (or curr_liab) is missing:
 ```{r}
-data <- data[!is.na(curr_assets) && !is.na(curr_liab)]
+data <- data[!is.na(curr_assets) | !is.na(curr_liab)]
 data <- data[!(is.na(ind) | ind == "")]
 data <- data[!(is.na(region_m) | region_m == "")]
 ```
@@ -86,17 +87,6 @@ data[sales == 0, .N]
 
 ```
 
-
-
-```{r}
-p1 <- ggplot(data= data, aes(x= log(curr_liab))) + geom_density()
-p2 <- ggplot(data= data, aes(x= log(curr_assets))) + geom_density()
-
-grid.arrange(p1, p2, ncol = 2)
-
-rm(p1)
-rm(p2)
-```
 
 ```{r, echo= FALSE}
 data <- data[, .(comp_id, 
@@ -189,8 +179,17 @@ dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) &
 #TODO: explain logic
 ```
 
+Example of dropped but not defaulted by this logic:
+```{r}
+head(dt[is_dropped==1 & is_defaulted == 0])
+
+## does this make sense?
+```  
+  
+  
 Summary by year (for reference, [here](https://www.ksh.hu/docs/hun/xftp/gyor/gaz/gaz1612.pdf) on p4 there is a table of "defaults" by industry):
-```{r, fig.align='center'}
+  
+```{r, fig.align='center', echo= FALSE}
 default_viz <- dt[, .(count= .N,
        default_count= sum(is_defaulted),
        default_pct= sum(is_defaulted) / .N * 100,
@@ -214,14 +213,75 @@ ggplot(data= default_viz) +
   scale_fill_manual(name = "Legend", values = c("# of observations" = "tomato")) + 
   labs(y = "# of observations", x = "Year", 
        title = "Visualizing all companies, with default rates", subtitle = "Breakdown by Region and Industry")
+
+rm(default_viz)
+rm(max_default_pct)
+rm(max_count)
+```
+  
+  
+Data viz for other variables:  
+
+Both curr_assets & curr_liab will be log transformed:  
+
+```{r, echo = FALSE}
+temp <- dt[, .(industry,
+                 region,
+                 log_liab= log(curr_liab), 
+                 log_assets= log(curr_assets))]
+temp2 <- melt(temp, id.vars = c("industry", "region"))
+
+ggplot(data= temp2, aes(x = value, fill = variable)) + 
+  geom_density(alpha=0.25) +
+  facet_grid(industry ~ region)
+
+rm(temp)
+rm(temp2)
+
+# p1 <- ggplot(data= data) + 
+#   geom_density(aes(x= log(curr_liab)))
+# p2 <- ggplot(data= data, aes(x= log(curr_assets))) + geom_density()
+# 
+# grid.arrange(p1, p2, ncol = 2)
+# 
+# rm(p1)
+# rm(p2)
 ```
 
-Example of dropped but not defaulted by this logic:
+
+Calculate a couple of YoY change ratios:  
+
 ```{r}
-head(dt[is_dropped==1 & is_defaulted == 0])
-
-## does this make sense?
+names(dt)
 ```
+
+
+```{r}
+dt[, liab_chg := prev_liab / prev_2_liab]
+dt[, asset_chg := prev_assets / prev_2_assets]
+dt[, sales_chg := prev_sales / prev_2_sales]
+```
+  
+Company age:  
+
+```{r}
+dt[, comp_age := year - founded_year]
+dt[, .N, by = founded_year][order(-N)]
+```
+
+
+```{r}
+# data_by_days_since_scheduled <- dt[ ,
+#   .(default_rate = mean(is_defaulted), num_obs = .N),
+#   keyby = .(days_category = cut(days_since_scheduled, breaks = c(-1, 0, 1, 2, 5, 10, 30, Inf), include.lowest = TRUE))]
+# 
+# ggplot(data = data_by_days_since_scheduled, 
+#        aes(x = days_category, y = no_show_rate, size = num_obs)) +
+#   geom_point() +
+#   ylim(0, NA)
+```
+
+
 
 
 ```{r}
@@ -248,29 +308,72 @@ train_control <- trainControl(method = "cv",
                               classProbs = TRUE)
 ```
 
-
+#### Model 1
 
 ```{r}
+#base model
 set.seed(93)
-glm_model <- train(is_defaulted ~ year+industry+region+prev_liab+prev_assets+prev_2_liab+prev_2_assets,
+glm_model <- train(is_defaulted ~ year + industry + region + prev_liab + prev_assets + prev_2_liab + prev_2_assets,
                    method = "glm",
                    data = data_train,
                    trControl = train_control)
-test_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
-test_truth <- data_test[["is_defaulted"]]
+
 ```
 
 
 ```{r}
-test_prediction_v2 <- ifelse(test_prediction_probs$Yes > 0.01, "Yes", "No")
+test_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
+test_truth <- data_test[["is_defaulted"]]
+
+test_prediction_v2 <- ifelse(test_prediction_probs$Yes > 0.04, "Yes", "No")
 test_prediction_v2 <- factor(test_prediction_v2, levels = c("Yes", "No"))
 confusionMatrix(test_prediction_v2, test_truth)
 ```
 
 
+```{r}
+thresholds <- seq(0.01, 0.2, by = 0.005)
 
+true_positive_rates <- rep(0, length(thresholds)) 
+false_positive_rates <- rep(0, length(thresholds)) 
 
-APPENDIX
+for (ix in 1:length(thresholds)) {
+  thr <- thresholds[ix]
+  test_prediction <- ifelse(test_prediction_probs$Yes > thr, "Yes", "No")
+  test_prediction <- factor(test_prediction, levels = c("Yes", "No"))
+  cm <- as.matrix(confusionMatrix(test_prediction, test_truth))
+  true_positive_rates[ix] <- cm[1, 1] / (cm[1, 1] + cm[2, 1])
+  false_positive_rates[ix] <- cm[1, 2] / (cm[1, 2] + cm[2, 2])
+} 
+```
+
+  
+ROC:  
+
+```{r}
+manual_roc <- data.table("threshold" = thresholds,
+                         "true_positive_rate" = true_positive_rates,
+                         "false_positive_rate" = false_positive_rates)
+
+ggplot(data = manual_roc, aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black")
+```
+  
+  
+AUC: 
+
+```{r}
+rocr_prediction <- prediction(test_prediction_probs$Yes,
+                              data_test[["is_defaulted"]])
+
+AUC <- performance(rocr_prediction, "auc")@y.values[[1]]
+print(AUC)
+```
+
+#### Model 2
+
+## APPENDIX
 
 ```{r, eval= FALSE}
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(curr_liab))) + geom_boxplot()
