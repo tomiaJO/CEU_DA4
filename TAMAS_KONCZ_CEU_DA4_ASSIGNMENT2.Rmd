@@ -71,6 +71,7 @@ Removing observations where curr_assets (or curr_liab) is missing:
 data <- data[!is.na(curr_assets) | !is.na(curr_liab)]
 data <- data[!(is.na(ind) | ind == "")]
 data <- data[!(is.na(region_m) | region_m == "")]
+data <- data[!is.na(founded_year)]
 ```
   
   
@@ -81,10 +82,6 @@ data[, c("D",
          "finished_prod", 
          "exit_year",
          "wages") := NULL]
-
-
-data[sales == 0, .N]
-
 ```
 
 
@@ -114,8 +111,8 @@ data_prev2 <- data[year < 2015,.(comp_id,
                      prev_2_assets= curr_assets,
                      prev_2_sales= curr_sales)]
 
-data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = TRUE) #all.x --> fine with missing T-2 data
-
+data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE) #filters down population. #TODO explain consequences
+?merge
 
 dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all = TRUE)
 
@@ -137,8 +134,7 @@ fun_replace_na <- function(x) {
 ```
 
 
-Some data handling:
-```{r}
+```{r, echo= FALSE}
 fun_count_na(dt)
 
 #fix founded_year
@@ -164,17 +160,23 @@ dt[, (cols) := lapply(.SD, fun_replace_na), .SDcols = cols] # change for founded
 
 fun_count_na(dt)
 ```
-  
+
+After some data handling in the backend (for technical details please see full code in the .rmd file), it's time to create an indicator for default.  
   
 [Definition for default](https://www.investopedia.com/terms/d/default2.asp): "... debtor is unable to meet the legal obligation of debt repayment...". Hence, the first requirement is to have some obligations to begin with.  
 
-The definition of default for this exercise will follow the same logic: looking at companies who had any liabilities during a year, but their performance deteoriated significantly the next.
+The definition of default for this exercise will follow the along this logic: looking at companies who had any liabilities during a year, but their performance deteoriated significantly the next, measured by sales dropping to 0.
+This definition is likely to be punitive, and not exactly relating to companies how have defaulted, but there are trade-offs in every decision in the lack-of and clear description for defaulted parties in the data.
+Limitation of this approach are:
+    - Sales is not a good measure for default. What we would actually be interested in is companies filing for default on court, but given that's not available, we use sales dropping to zero as an indicatory dummy for businesses "closing down".  
+    But let's consider i.e. a project firm, that was created for a set of time purposefully - if these firms are not operating any longer those are not real defaults.
+    - We don't know what happened to firms that suddenly "exit" the dataset. AS a conservative approach (in terms of defining default scenarios as wide as possible), if a firm is no longer in the data, but had liabilities as of the last records, that will be considered a default.
 
 Code to create the target variable, is_defaulted:
 ```{r}
-dt[, is_defaulted := ifelse((curr_liab > 0 & prev_liab > 0) & 
-                              (curr_sales == 0 & prev_sales > 0), 
-                            1, 0)]
+dt[, is_defaulted := ifelse((curr_sales == 0 & prev_sales > 0) &
+                            (curr_liab > 0 | (prev_liab > 0 & is_dropped == 1))
+                            , 1, 0)]
 
 #TODO: explain logic
 ```
@@ -220,15 +222,16 @@ rm(max_count)
 ```
   
   
-Data viz for other variables:  
+#### Visual data exploration
 
-Both curr_assets & curr_liab will be log transformed:  
+Both Assets, Liabilities, and Sales will be log transformed:  
 
 ```{r, echo = FALSE}
-temp <- dt[, .(industry,
-                 region,
-                 log_liab= log(curr_liab), 
-                 log_assets= log(curr_assets))]
+temp <- dt[, .(industry, 
+               region, 
+               log_liab= log(curr_liab), 
+               log_assets= log(curr_assets),
+               log_sales= log(curr_sales))]
 temp2 <- melt(temp, id.vars = c("industry", "region"))
 
 ggplot(data= temp2, aes(x = value, fill = variable)) + 
@@ -248,39 +251,87 @@ rm(temp2)
 # rm(p2)
 ```
 
+Log transformations:
+```{r}
+dt[, prev_liab := ifelse(prev_liab>0, prev_liab, 0.1)]
+dt[,log_liab := log(prev_liab)]
+dt[, prev_2_liab := ifelse(prev_2_liab>0, prev_2_liab, 0.1)]
+dt[,log_liab_2 := log(prev_2_liab)]
+
+dt[, prev_assets := ifelse(prev_assets>0, prev_assets, 0.1)]
+dt[,log_asset := log(prev_assets)]
+dt[, prev_2_assets := ifelse(prev_2_assets>0, prev_2_assets, 0.1)]
+dt[,log_asset_2 := log(prev_2_assets)]
+
+dt[, prev_sales := ifelse(prev_sales>0, prev_sales, 0.1)]
+dt[,log_sales := log(prev_sales)]
+dt[, prev_2_sales := ifelse(prev_2_sales>0, prev_2_sales, 0.1)]
+dt[,log_sales_2 := log(prev_2_sales)]
+```
+
+Dropping variables which are not appropriate for prediction, given their availability might be only _after-the-fact_.
+
+```{r}
+dt[, curr_liab := NULL]
+dt[, curr_assets := NULL]
+dt[, curr_sales := NULL]
+
+dt[, is_new := NULL]
+dt[, is_dropped := NULL]
+
+dt[, comp_id := NULL]
+```
 
 Calculate a couple of YoY change ratios:  
 
-```{r}
-names(dt)
-```
-
 
 ```{r}
-dt[, liab_chg := prev_liab / prev_2_liab]
-dt[, asset_chg := prev_assets / prev_2_assets]
-dt[, sales_chg := prev_sales / prev_2_sales]
+dt[, liab_chg := log_liab - log_liab_2]
+dt[, liab_chg := ifelse(!is.na(liab_chg), liab_chg, 1)]
+dt[, asset_chg := log_asset - log_asset_2]
+dt[, asset_chg := ifelse(!is.na(asset_chg), asset_chg, 1)]
+dt[, sales_chg := log_sales - log_sales_2]
+dt[, sales_chg := ifelse(!is.na(sales_chg), sales_chg, 1)]
 ```
   
 Company age:  
 
-```{r}
+```{r, echo= FALSE}
 dt[, comp_age := year - founded_year]
-dt[, .N, by = founded_year][order(-N)]
 ```
 
 
-```{r}
-# data_by_days_since_scheduled <- dt[ ,
-#   .(default_rate = mean(is_defaulted), num_obs = .N),
-#   keyby = .(days_category = cut(days_since_scheduled, breaks = c(-1, 0, 1, 2, 5, 10, 30, Inf), include.lowest = TRUE))]
-# 
-# ggplot(data = data_by_days_since_scheduled, 
-#        aes(x = days_category, y = no_show_rate, size = num_obs)) +
-#   geom_point() +
-#   ylim(0, NA)
+```{r, echo= FALSE}
+data_by_comp_age <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(age_category = cut(comp_age, breaks = c(0, 1, 2, 3, 4, 5, 10, 15, 20, 30, Inf), include.lowest = TRUE))]
+
+ggplot(data = data_by_comp_age,
+       aes(x = age_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Age Category", title = "Relationship between company age and default rates", subtitle = "(Note: Age buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
+  
 ```
 
+```{r, echo= FALSE}
+#liab
+data_by_liab <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(liab_category = cut(log(prev_liab), breaks = c(-1, 0, 1, 2, 3, 5, 8, 9, 10, 11, 13, 20, Inf), include.lowest = TRUE))]
+
+ggplot(data = data_by_liab,
+       aes(x = liab_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA)
+```
+
+```{r, echo= FALSE}
+#assets
+data_by_asset <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(asset_category = cut(log(prev_assets), breaks = c(-1, 0, 1, 2, 3, 5, 8, 9, 10, 11, 13, 20, Inf), include.lowest = TRUE))]
+
+ggplot(data = data_by_asset,
+       aes(x = asset_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA)
+```
 
 
 
@@ -289,6 +340,8 @@ dt[, is_defaulted:= ifelse(is_defaulted==1, "Yes", "No")]
 dt[, is_defaulted := factor(is_defaulted, levels = c("Yes", "No"))]
 ```
 
+#### Prediction: building models
+Note before we jump into prediction: deliberately, I used variables only from the year(s) _before_ the default. This is to make sure that only information was used for prediction which is available aprior.
 
 ```{r}
 training_ratio <- 0.7
@@ -315,52 +368,19 @@ train_control <- trainControl(method = "cv",
 set.seed(93)
 glm_model <- train(is_defaulted ~ year + industry + region + prev_liab + prev_assets + prev_2_liab + prev_2_assets,
                    method = "glm",
+                   family = "binomial",
+                   metric = "AUC",
                    data = data_train,
                    trControl = train_control)
 
 ```
 
-
 ```{r}
 test_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
 test_truth <- data_test[["is_defaulted"]]
-
-test_prediction_v2 <- ifelse(test_prediction_probs$Yes > 0.04, "Yes", "No")
-test_prediction_v2 <- factor(test_prediction_v2, levels = c("Yes", "No"))
-confusionMatrix(test_prediction_v2, test_truth)
 ```
 
 
-```{r}
-thresholds <- seq(0.01, 0.2, by = 0.005)
-
-true_positive_rates <- rep(0, length(thresholds)) 
-false_positive_rates <- rep(0, length(thresholds)) 
-
-for (ix in 1:length(thresholds)) {
-  thr <- thresholds[ix]
-  test_prediction <- ifelse(test_prediction_probs$Yes > thr, "Yes", "No")
-  test_prediction <- factor(test_prediction, levels = c("Yes", "No"))
-  cm <- as.matrix(confusionMatrix(test_prediction, test_truth))
-  true_positive_rates[ix] <- cm[1, 1] / (cm[1, 1] + cm[2, 1])
-  false_positive_rates[ix] <- cm[1, 2] / (cm[1, 2] + cm[2, 2])
-} 
-```
-
-  
-ROC:  
-
-```{r}
-manual_roc <- data.table("threshold" = thresholds,
-                         "true_positive_rate" = true_positive_rates,
-                         "false_positive_rate" = false_positive_rates)
-
-ggplot(data = manual_roc, aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
-  geom_point() +
-  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black")
-```
-  
-  
 AUC: 
 
 ```{r}
@@ -371,8 +391,74 @@ AUC <- performance(rocr_prediction, "auc")@y.values[[1]]
 print(AUC)
 ```
 
-#### Model 2
+  
+ROC:  
 
+```{r}
+thresholds <- seq(0.01, 0.2, by = 0.005)
+
+true_positive_rates <- rep(0, length(thresholds))
+false_positive_rates <- rep(0, length(thresholds))
+
+for (ix in 1:length(thresholds)) {
+  thr <- thresholds[ix]
+  test_prediction <- ifelse(test_prediction_probs$Yes > thr, "Yes", "No")
+  test_prediction <- factor(test_prediction, levels = c("Yes", "No"))
+  cm <- as.matrix(confusionMatrix(test_prediction, test_truth))
+  true_positive_rates[ix] <- cm[1, 1] / (cm[1, 1] + cm[2, 1])
+  false_positive_rates[ix] <- cm[1, 2] / (cm[1, 2] + cm[2, 2])
+}
+
+manual_roc <- data.table("threshold" = thresholds,
+                         "true_positive_rate" = true_positive_rates,
+                         "false_positive_rate" = false_positive_rates)
+
+ggplot(data = manual_roc, aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black")
+```
+  
+  
+#### Model 2
+```{r}
+names(dt)
+
+fun_count_na(dt)
+
+dt[is.na(sales_chg)]
+```
+
+
+```{r}
+#base model
+set.seed(93)
+glm_model <- train(is_defaulted ~ .,
+                   method = "glmnet",
+                   family = "binomial",
+                   metric = "AUC",
+                   data = data_train,
+                   trControl = train_control,
+                   tuneLength = 10)
+
+```
+
+```{r}
+test_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
+test_truth <- data_test[["is_defaulted"]]
+```
+
+
+AUC: 
+
+```{r}
+rocr_prediction <- prediction(test_prediction_probs$Yes,
+                              data_test[["is_defaulted"]])
+
+AUC <- performance(rocr_prediction, "auc")@y.values[[1]]
+print(AUC)
+
+
+```
 ## APPENDIX
 
 ```{r, eval= FALSE}
