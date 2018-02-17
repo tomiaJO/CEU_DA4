@@ -362,7 +362,8 @@ data_test <- dt[-train_indices, ]
 ```{r}
 train_control <- trainControl(method = "cv",
                               number = 10,
-                              classProbs = TRUE)
+                              classProbs = TRUE,
+                              summaryFunction=twoClassSummary)
 ```
 
 #### Model 1
@@ -395,7 +396,7 @@ fun_calc_auc <- function(prediction_probs, truth) {
 ```
 
 ```{r, echo = FALSE}
-fun_roc_create <- function(prediction_probs, truth) {
+fun_roc_create <- function(prediction_probs, truth, AUC= NULL, model= NULL) {
 
 min_prob <- min(prediction_probs$Yes)
 max_prob <- max(prediction_probs$Yes)
@@ -418,23 +419,21 @@ manual_roc <- data.table("threshold" = thresholds,
                          "true_positive_rate" = true_positive_rates,
                          "false_positive_rate" = false_positive_rates)
 
-ggplot(data = manual_roc, aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
+s_title <- ifelse(is.null(model), "", paste("ROC curve for Model:", model, sep = " "))
+s_subtitle <- ifelse(is.null(AUC), "", paste("AUC =", round(AUC, 2), sep = " "))
+
+ggplot(data = manual_roc, 
+       aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
   geom_point() +
-  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black")
+  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black") +
+  labs(title = s_title, subtitle = s_subtitle)
 }
 ```
 
-AUC: 
 
-```{r}
+```{r, echo= FALSE}
 glm_AUC <- fun_calc_auc(glm_prediction_probs, test_truth)
-print(glm_AUC)
-```
-
-ROC:  
-
-```{r}
-fun_roc_create(glm_prediction_probs, test_truth)
+glm_ROC <- fun_roc_create(glm_prediction_probs, test_truth, glm_AUC, "glm")
 ```
   
   
@@ -460,17 +459,9 @@ glmnet_model <- train(is_defaulted ~ .,
 glmnet_prediction_probs <- predict.train(glmnet_model, newdata = data_test, type= "prob")
 ```
 
-AUC: 
-
-```{r}
-glm_AUC <- fun_calc_auc(glmnet_prediction_probs, test_truth)
-print(glm_AUC)
-```
-
-ROC:  
-
-```{r}
-fun_roc_create(glmnet_prediction_probs, test_truth)
+```{r, echo= FALSE}
+glmnet_AUC <- fun_calc_auc(glmnet_prediction_probs, test_truth)
+glmnet_ROC <- fun_roc_create(glmnet_prediction_probs, test_truth, glmnet_AUC, "glmnet")
 ```
 
 #### Model 3
@@ -495,19 +486,41 @@ rpart_model <- train(is_defaulted ~ .,
 rpart_prediction_probs <- predict.train(rpart_model, newdata = data_test, type= "prob")
 ```
 
-AUC: 
-
-```{r}
-AUC <- fun_calc_auc(rpart_prediction_probs, test_truth)
-print(AUC)
+```{r, echo= FALSE}
+rpart_AUC <- fun_calc_auc(rpart_prediction_probs, test_truth)
+rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpart")
 ```
 
-ROC:
+#### Model 3
 
 ```{r}
-fun_roc_create(rpart_prediction_probs, test_truth)
+fitControl <- trainControl(method = "cv", 
+                           number = 10, 
+                           classProbs = TRUE,
+                           summaryFunction = twoClassSummary)
+
+set.seed(93)
+rf_model <- train(is_defaulted ~ .,
+                   data = data_train,
+                   method = "rf",
+                   tuneLength=20,
+                   metric="ROC",
+                   trControl = fitControl)
+
 ```
 
+```{r}
+rpart_prediction_probs <- predict.train(rpart_model, newdata = data_test, type= "prob")
+```
+
+```{r, echo= FALSE}
+rpart_AUC <- fun_calc_auc(rpart_prediction_probs, test_truth)
+rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpart")
+```
+
+```{r, fig.height=15, fig.width=15}
+grid.arrange(glm_ROC, glmnet_ROC, rpart_ROC, ncol = 1)
+```
 
 ## APPENDIX
 
