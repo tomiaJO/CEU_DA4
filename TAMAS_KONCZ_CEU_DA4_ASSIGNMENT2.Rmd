@@ -3,9 +3,9 @@ title: "DA4 -  Assignment 1"
 author: "Tamas Koncz"
 date: '2018-02-11'
 output:
-  html_document:
-    df_print: paged
   html_notebook:
+    df_print: paged
+  html_document:
     df_print: paged
   pdf_document: default
 ---
@@ -126,7 +126,6 @@ data_prev2 <- data[year < 2015,.(comp_id,
                      prev_2_sales= curr_sales)]
 
 data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE) #filters down population. #TODO explain consequences
-?merge
 
 dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE)
 
@@ -235,9 +234,9 @@ rm(max_count)
   
 #### Visual data exploration
 
-Both Assets, Liabilities, and Sales will be log transformed:  
+Some of the variables (Assets, Liabilities, and Sales) are close to being log-normally distributed:  
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, fig.align='center', fig.width=6, fig.height=4}
 temp <- dt[, .(industry, 
                region, 
                log_liab= log(curr_liab), 
@@ -247,22 +246,15 @@ temp2 <- melt(temp, id.vars = c("industry", "region"))
 
 ggplot(data= temp2, aes(x = value, fill = variable)) + 
   geom_density(alpha=0.25) +
-  facet_grid(industry ~ region)
+  facet_grid(industry ~ region) + 
+  labs(title = "Density diagrams of Assets, Liabilities and Sales", 
+       subtitle = "Breakdown by region & industry")
 
 rm(temp)
 rm(temp2)
-
-# p1 <- ggplot(data= data) + 
-#   geom_density(aes(x= log(curr_liab)))
-# p2 <- ggplot(data= data, aes(x= log(curr_assets))) + geom_density()
-# 
-# grid.arrange(p1, p2, ncol = 2)
-# 
-# rm(p1)
-# rm(p2)
 ```
 
-Log transformations:
+These will be Log-transformated, with a little correction term (for log(0) = -Inf):
 ```{r}
 dt[, prev_liab := ifelse(prev_liab>0, prev_liab, 0.1)]
 dt[,log_liab := log(prev_liab)]
@@ -292,18 +284,6 @@ dt[, is_dropped := NULL]
 
 dt[, comp_id := NULL]
 ```
-
-Calculate a couple of YoY change ratios:  
-
-
-```{r}
-dt[, liab_chg := log_liab - log_liab_2]
-dt[, liab_chg := ifelse(!is.na(liab_chg), liab_chg, 1)]
-dt[, asset_chg := log_asset - log_asset_2]
-dt[, asset_chg := ifelse(!is.na(asset_chg), asset_chg, 1)]
-dt[, sales_chg := log_sales - log_sales_2]
-dt[, sales_chg := ifelse(!is.na(sales_chg), sales_chg, 1)]
-```
   
 Company age:  
 
@@ -315,7 +295,7 @@ dt[, comp_age := year - founded_year]
 ```{r, echo= FALSE}
 data_by_comp_age <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(age_category = cut(comp_age, breaks = c(0, 1, 2, 3, 4, 5, 10, 15, 20, 30, Inf), include.lowest = TRUE))]
 
-ggplot(data = data_by_comp_age,
+p1 <- ggplot(data = data_by_comp_age,
        aes(x = age_category, y = default_rate, size = num_obs)) +
   geom_point() +
   ylim(0, NA) +
@@ -328,36 +308,83 @@ ggplot(data = data_by_comp_age,
 #liab
 data_by_liab <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(liab_category = cut(log(prev_liab), breaks = c(-1, 0, 1, 2, 3, 5, 8, 9, 10, 11, 13, 20, Inf), include.lowest = TRUE))]
 
-ggplot(data = data_by_liab,
+p2 <- ggplot(data = data_by_liab,
        aes(x = liab_category, y = default_rate, size = num_obs)) +
   geom_point() +
-  ylim(0, NA)
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Liabilities Category", title = "Relationship between log(Liabilities) and default rates", subtitle = "(Note: Buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
 ```
 
 ```{r, echo= FALSE}
 #assets
 data_by_asset <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(asset_category = cut(log(prev_assets), breaks = c(-1, 0, 1, 2, 3, 5, 8, 9, 10, 11, 13, 20, Inf), include.lowest = TRUE))]
 
-ggplot(data = data_by_asset,
+p3 <- ggplot(data = data_by_asset,
        aes(x = asset_category, y = default_rate, size = num_obs)) +
   geom_point() +
-  ylim(0, NA)
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Assets Category", title = "Relationship between log(Assets) and default rates", subtitle = "(Note: Buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
 ```
 
+```{r, echo = FALSE, fig.align='center', fig.width=15, fig.height=4}
+grid.arrange(p1, p2, p3, ncol = 3)
+```
 
+Different relationship patterns between default frequencies and the predictors can be observed:  
+    1. for Age, the pattern is relatively linear - for simplicity reasons, no extra term will be created to help fit non-linearities in the logistic regression models  
+    2. for Liabilities, the dynamics are more complicated. This is likely due to the fact that while more liabilities can be considered a burden, we can observe that larger companies (who tend to hold more liabilities as well in absolute terms) are less likely to suddenly go bust  
+    3. For Assets, there is a clear negative relationship between default frequencies and assets, however it is not linear  
+
+Let's address this with the inclusion of some polynomial terms:  
 
 ```{r}
+#prev log(liab)
+dt[, log_liab_sq := log_liab^2]
+dt[, log_liab_cub := log_liab^2]
+
+#t-2 log(liab)
+dt[, log_liab_2_sq := log_liab_2^2]
+dt[, log_liab_2_cub := log_liab_2^2]
+
+#prev log(assets)
+dt[, log_asset_sq := log_asset^2]
+
+#t-2 log(assets)
+dt[, log_asset_2_sq := log_asset_2^2]
+```
+
+```{r, echo = FALSE}
+dt[, c("prev_liab", "prev_assets", "prev_sales",
+       "prev_2_liab", "prev_2_assets", "prev_2_sales") := NULL]
+```
+Calculate a couple of YoY change ratios:  
+
+```{r}
+dt[, liab_chg := log_liab - log_liab_2]
+dt[, liab_chg := ifelse(!is.na(liab_chg), liab_chg, 1)]
+dt[, asset_chg := log_asset - log_asset_2]
+dt[, asset_chg := ifelse(!is.na(asset_chg), asset_chg, 1)]
+dt[, sales_chg := log_sales - log_sales_2]
+dt[, sales_chg := ifelse(!is.na(sales_chg), sales_chg, 1)]
+```
+    
+```{r, echo = FALSE}
 dt[, is_defaulted:= ifelse(is_defaulted==1, "Yes", "No")]
 dt[, is_defaulted := factor(is_defaulted, levels = c("Yes", "No"))]
 ```
 
-#### Prediction: building models
+### Prediction: training models
 Note before we jump into prediction: deliberately, I used variables only from the year(s) _before_ the default. This is to make sure that only information was used for prediction which is available aprior.
-```{r}
-names(dt)
-```
 
 
+There will be 3 sub-samples used:  
+    1. A training set, 60% of the whole dataset, used to train & tune models via 10-fold CV.  
+    2. A test set, 30% of the whole dataset, which is used to compare models and pick the best one for our purpose  
+    3. A final performance evaulation set, 10% of the whole data, which is to calculate independent performance metrics (as the previous two sets were used for training and picking the mode, we need an "independent" set to measure real expected performance)  
+    
+    
 ```{r}
 training_ratio <- 0.6
 
@@ -379,6 +406,10 @@ perf_indices <- createDataPartition(y = data_test[["is_defaulted"]],
 data_test <- data_test[perf_indices, ]
 data_perf <- data_test[-perf_indices, ]
 ```
+  
+  
+  
+Control function, setting 10-fold CV, and telling the used caret-package that we are predicting binary categorizes (classification setup):  
 
 ```{r}
 train_control <- trainControl(method = "cv",
@@ -387,7 +418,11 @@ train_control <- trainControl(method = "cv",
                               summaryFunction = twoClassSummary)
 ```
 
-#### Model 1 - basic glm
+#### Model 1 - basic glm  
+  
+The first model trained is a simple logit model, with only a subset of variables used.  
+  
+(For this model, and all others, caret is set to optimize the AUC.)  
 
 ```{r}
 #base model
@@ -400,8 +435,10 @@ glm_model <- train(is_defaulted ~ year + industry + region + log_liab + log_liab
                    trControl = train_control)
 
 ```
-
-```{r}
+  
+In total 4 models are being created - after each are done, there performance will be compared.  
+  
+```{r, echo = FALSE}
 glm_prediction_probs <- predict.train(glm_model, newdata = data_test, type= "prob")
 test_truth <- data_test[["is_defaulted"]]
 ```
@@ -451,7 +488,7 @@ fun_roc_create <- function(prediction_probs, truth, AUC= NULL, model= NULL) {
 }
 ```
 
-```{r}
+```{r, echo = FALSE}
 fun_calibration_create <- function(prediction_probs, truth, model= NULL) {
   
   truth_numeric <- ifelse(truth == "Yes", 1, 0)
@@ -559,8 +596,9 @@ treebag_AUC <- fun_calc_auc(treebag_prediction_probs, test_truth)
 treebag_ROC <- fun_roc_create(treebag_prediction_probs, test_truth, treebag_AUC, "treebag")
 treebag_calibration <- fun_calibration_create(treebag_prediction_probs, test_truth, "treebag")
 ```
-
-
+  
+### Model selection based on performance  
+  
 ```{r, fig.height=15, fig.width=15}
 grid.arrange(glm_ROC, glm_calibration,
              glmnet_ROC, glmnet_calibration,
@@ -568,6 +606,12 @@ grid.arrange(glm_ROC, glm_calibration,
              treebag_ROC, treebag_calibration,
              ncol = 2)
 ```
+
+### Evaluating performance for the final model
+
+### Last thoughts 
+
+#### Concerns: external validty and implication of sample-limitating decisions
 
 ## APPENDIX
 
