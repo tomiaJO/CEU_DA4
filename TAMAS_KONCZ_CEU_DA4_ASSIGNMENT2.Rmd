@@ -3,9 +3,9 @@ title: "DA4 -  Assignment 1"
 author: "Tamas Koncz"
 date: '2018-02-11'
 output:
-  html_notebook:
-    df_print: paged
   html_document:
+    df_print: paged
+  html_notebook:
     df_print: paged
   pdf_document: default
 ---
@@ -330,6 +330,9 @@ p3 <- ggplot(data = data_by_asset,
 
 ```{r, echo = FALSE, fig.align='center', fig.width=15, fig.height=4}
 grid.arrange(p1, p2, p3, ncol = 3)
+rm(p1)
+rm(p2)
+rm(p3)
 ```
 
 Different relationship patterns between default frequencies and the predictors can be observed:  
@@ -359,6 +362,8 @@ dt[, log_asset_2_sq := log_asset_2^2]
 dt[, c("prev_liab", "prev_assets", "prev_sales",
        "prev_2_liab", "prev_2_assets", "prev_2_sales") := NULL]
 ```
+  
+  
 Calculate a couple of YoY change ratios:  
 
 ```{r}
@@ -369,6 +374,51 @@ dt[, asset_chg := ifelse(!is.na(asset_chg), asset_chg, 1)]
 dt[, sales_chg := log_sales - log_sales_2]
 dt[, sales_chg := ifelse(!is.na(sales_chg), sales_chg, 1)]
 ```
+    
+```{r, echo= FALSE}
+# liab_chg
+data_by_liab_chg <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(liab_chg_category = cut(liab_chg, breaks = 10))]
+
+p1 <- ggplot(data = data_by_liab_chg,
+       aes(x = liab_chg_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Liab. Growth Category", title = "Change in Log(Liabilities) and default rates", subtitle = "(Note: Buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
+
+# asset_chg
+data_by_asset_chg <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(asset_chg_category = cut(asset_chg, breaks = 10))]
+
+p2 <- ggplot(data = data_by_asset_chg,
+       aes(x = asset_chg_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Assets Growth Category", title = "Change in Log(Assets) and default rates", subtitle = "(Note: Buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
+
+#sales_chg
+data_by_sales_chg <- dt[ ,.(default_rate = mean(is_defaulted), num_obs = .N), keyby = .(sales_chg_category = cut(sales_chg, breaks = 10))]
+
+p3 <- ggplot(data = data_by_sales_chg,
+       aes(x = sales_chg_category, y = default_rate, size = num_obs)) +
+  geom_point() +
+  ylim(0, NA) +
+  labs(y = "Default frequencies", x = "Sales Growth Category", title = "Change in Log(Sales) and default rates", subtitle = "(Note: Buckets are not same length)") +
+  theme(plot.subtitle=element_text(face="italic"))
+```
+
+```{r, echo = FALSE, fig.align='center', fig.width=15, fig.height=4}
+grid.arrange(p1, p2, p3, ncol = 3)
+rm(p1)
+rm(p2)
+rm(p3)
+```
+
+We can see that the relationsip types for these variables are all-over the place. If we wanted to model these and their interactions properly, that could be done with further polynomial terms, dummy variables for some cuts, etc.  
+  
+However, here the goal is to create the best predictive model, with the great-ease that this being a University project, there is no need to create an explainable model for stakeholders.  
+Hence, we will see the power of some flexible tree-based ML-models, which can model these relationships without much analyst adjustment - and I am not going to create further extra terms.  
+
     
 ```{r, echo = FALSE}
 dt[, is_defaulted:= ifelse(is_defaulted==1, "Yes", "No")]
@@ -524,7 +574,12 @@ glm_calibration <- fun_calibration_create(glm_prediction_probs, test_truth, "glm
 ```
   
   
-#### Model 2
+#### Model 2  
+  
+The second model to be created is also a Logit-model.  
+However, compared to the previous example, we'll let the machine do some of our work - there is no variable selection by analyst judgment.  
+Rather, we are using LASSO- and Ridge regularization, and let the lamdba parameter be optimized by glmnet's grid-search algorithm (below range for lambda search was pre-selected based on some trial runs).  
+
 
 ```{r}
 tune_grid <- expand.grid("alpha" = c(0, 1),
@@ -542,7 +597,7 @@ glmnet_model <- train(is_defaulted ~ .,
 
 ```
 
-```{r}
+```{r, echo = FALSE}
 glmnet_prediction_probs <- predict.train(glmnet_model, newdata = data_test, type= "prob")
 ```
 
@@ -552,20 +607,23 @@ glmnet_ROC <- fun_roc_create(glmnet_prediction_probs, test_truth, glmnet_AUC, "g
 glmnet_calibration <- fun_calibration_create(glmnet_prediction_probs, test_truth, "glmnet")
 ```
 
-#### Model 3
+#### Model 3  
+  
+The third method is a single tree, which has a nice advantage compared to previous method, as it is able to pick-up non-linearities without much interaction, simply by creating multiple splitting-nodes of the same variable (similarly it goes for interactions between variables).  
+The disadvantages of a single tree will be addressed by the next model.  
 
 ```{r}
 set.seed(93)
 rpart_model <- train(is_defaulted ~ .,
                    data = data_train,
                    method = "rpart",
-                   tuneLength=20,
-                   metric="ROC",
+                   tuneLength = 20,
+                   metric = "ROC",
                    trControl = train_control)
 
 ```
 
-```{r}
+```{r, echo = FALSE}
 rpart_prediction_probs <- predict.train(rpart_model, newdata = data_test, type= "prob")
 ```
 
@@ -575,7 +633,12 @@ rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpar
 rpart_calibration <- fun_calibration_create(rpart_prediction_probs, test_truth, "rpart")
 ```
 
-#### Model 4
+#### Model 4  
+
+The last method being run utilizies bagging - bootstrap aggregation.  
+In this example, multiple trees are being fit on equal-sized, bootsrap selected sub-samples, and the final prediction is the aggregate of all these trees' separate prediction.   
+This method helps correct for the "locality" problem of using a single tree.  
+(Note: I wanted to train a random forest as well, however it was taking significant runtime, while not producing any superior results)
 
 ```{r}
 set.seed(93)
@@ -587,7 +650,7 @@ treebag_model <- train(is_defaulted ~ .,
 
 ```
 
-```{r}
+```{r, echo= FALSE}
 treebag_prediction_probs <- predict.train(treebag_model, newdata = data_test, type= "prob")
 ```
 
@@ -606,62 +669,72 @@ grid.arrange(glm_ROC, glm_calibration,
              treebag_ROC, treebag_calibration,
              ncol = 2)
 ```
+  
+The primary metric for selecting the best model is Area-Under-the-(ROC)Curve, AUC.  
+Also, by plotting the ROC curve we can better understand the trade-offs we have to make based on the models performance.  
 
-### Evaluating performance for the final model
+In the next section I will elaborate more on these trade-offs. For now, let's see what model should we chose based on performance.  
+  
+All models performed relatively nicely (at least compared to my initial expectations).  
+Performance, measured by AUC, increased together with model complexity - on the test set! So it could be argued that model tuning was done well, overfitting could be avoided even with the more flexible methods (having a not-so-small sample size certainly helped).  
+  
+ROC curve show that even though there is (as usual) a trade-off in false positive rate and true positive rate when choosing cut-off probabilities, we should be able to make a good decision (something I'll keep for later, with the final model).  
+
+Let's discuss calibrations as well: the picture is more complex here. No model produces well-calibrated probabilities across the board. The large observation groups were more-or-less fitted nicely, however for smaller groups (which could be still significant for our purpose) the results vary a lot.  
+
+This is what led to the decision on the best model as well: while other methods were not consistent, bagging consistently overpredicted the further-from-0 probabilities.  
+Is this a good think? In  my view, predicting probabilities should be a conservative venture.  
+  
+If I'm a lender, I'm certainly missing out on revenue opportunities if I'm overly risk-averse. However, our loss function should not be symmetrical, neither linear in this case - larger losses are almost certainly exponentially more painful than smaller ones, while by virtue of the business of lending (if we predict probabilities for that purpose), gains are limited.  
+
+Hence, my choice for the best model is model #4. Measured by AUC, it's a draw between this one and a signle tree.  
+However, it has two benefits. One is the aforementioned probability calibration being better fit for the purpose, and the other is robustness - as discussed earlier, a single tree is prone to fall into local optimum. By having a more robust method, I expect we would achieve larger external validty for further use.
+
+### Evaluating performance for the final model  
+  
+```{r, echo= FALSE}
+final_probs <- predict.train(treebag_model, newdata = data_perf, type= "prob")
+perf_truth <- data_perf[["is_defaulted"]]
+```
+
+```{r, echo= FALSE}
+treebag_AUC <- fun_calc_auc(final_probs, perf_truth)
+treebag_ROC <- fun_roc_create(final_probs, perf_truth, treebag_AUC, "treebag")
+treebag_calibration <- fun_calibration_create(final_probs, perf_truth, "treebag")
+```
+  
+Let's measure performance one more time for the chosen model, for a held-out set specifically for this purpose:  
+
+```{r, echo=FALSE, fig.height=4, fig.width=15}
+grid.arrange(treebag_ROC, treebag_calibration, ncol = 2)
+```
+Results are in line with what we've seen before.  
+  
+There is a significant step remaining: selecting the cut-off probability for predicting yeses.  
+  
+Generally, we are trading sensitivity-for-specificity here, which we can optimalize based on the ROC curve.
+I want to consider another factor here - as previously mentioned, false negatives are the real cost here. Hence, the resulting cut-off choice is 0.1, and the resulting confusion matrix is below:  
+```{r, echo = FALSE}
+whole_truth <- dt$is_defaulted
+whole_probs <- predict.train(treebag_model, newdata = dt, type= "prob")
+
+whole_pred <- ifelse(whole_probs$Yes > 0.10, "Yes", "No")
+whole_pred <- factor(whole_pred, levels = c("Yes", "No"))
+m <- as.matrix(confusionMatrix(whole_pred, whole_truth), what = "xtabs")
+rownames(m) <- c("Predicted - Yes","Predicted - No")
+colnames(m) <- c("Actual - Yes","Actual - No")
+m
+```
+
+_Note: For this, I re-predicted probabilities for the whole dataset (keep in mind that yes/no-s are very unbalanced, hence I hope to have a more robust choice this way)._
+
+It's true that we do predict a lot of false negatives, but this is a deliberate choice. Actually, we predict ~90% of both defaults and non-defaults correctly, which can be considered a good outcome in my view.  
+
 
 ### Last thoughts 
 
+As the conclusion for this analysis, I'd like to share two things which I consider the main plausible limitations of this study:  
+
+
 #### Concerns: external validty and implication of sample-limitating decisions
-
-## APPENDIX
-
-```{r, eval= FALSE}
-ggplot(data= dt, aes(x= factor(is_defaulted), y= log(curr_liab))) + geom_boxplot()
-ggplot(data= dt, aes(x= factor(is_defaulted), y= log(prev_liab))) + geom_boxplot()
-```
-
-```{r, eval= FALSE}
-dt[, liab_growth := ifelse(curr_liab > 0 & prev_liab == 0, 1, curr_liab/prev_liab)]
-
-ggplot(data= dt, aes(x= factor(is_defaulted), y= log(liab_growth))) + geom_boxplot()
-
-```
-
-
-```{r, eval= FALSE}
-#prev liab vs curr liab
-ggplot(data = dt, aes(x= prev_liab, y= curr_liab)) + 
-  geom_point(alpha=.1) + 
-  scale_y_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x))) + 
-  scale_x_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x)))
-
-#curr assets vs curr liab
-ggplot(data = dt, aes(x= curr_assets, y= curr_liab)) + 
-  geom_point(alpha=.1) + 
-  scale_y_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x))) + 
-  scale_x_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x)))  +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed") 
-
-
-#curr assets vs curr liab
-ggplot(data = dt, aes(x= curr_liab, y= curr_sales)) + 
-  geom_point(alpha=.1) + 
-  scale_y_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x))) + 
-  scale_x_continuous(trans = 'log10',
-                        breaks = trans_breaks('log10', function(x) 10^x),
-                        labels = trans_format('log10', math_format(10^.x)))  +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed") 
-
-```
-
 
