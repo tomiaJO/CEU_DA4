@@ -43,11 +43,11 @@ x <- fread("./../Data/DA4/bisnode_all.csv",
 print(skim(data))
 ```
 
-```{r}
+```{r, echo= FALSE}
 data <- copy(x)
 ```
 
-```{r}
+```{r, echo= FALSE}
 fun_count_na <- function(dt) {
   missing_values <- as.data.table(t(dt[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = names(dt)]),
                                   keep.rownames = TRUE)
@@ -57,25 +57,31 @@ fun_count_na <- function(dt) {
 }
 ```
 
+### Understanding the dataset  
 
-Look at missing values in the dataset:
+After simply reading in the dataset, first step is to understand what we are working with.
+A key component of data quality is completness, which is defined as having as little not-known values as possible for our variables.
+
+A glimpse into the missing values, order by most NA-s, top 10 below:
 ```{r}
-fun_count_na(data)
-
-# v<-dcast(data[, c("comp_id", "year")], comp_id ~ year)
-# v[,.N]
+fun_count_na(data)[1:10]
 ```
   
-Removing observations where curr_assets (or curr_liab) is missing:
+  
+The approach I'm taking here is the following:   
+    - for some key variables, having NAs is not toleratable. As we are going to predict financial performance, a good example of key variables are liabilites or assets. If such variables are missing, the whole observation will be dropped.  
+    - for other variables, which are likely less important, if there are too many missing values, I'm simplying not using the variable for prediction. An example could be birth_year (CEO) - dropping these observations could be costly in terms of limiting our working sample too much (for the benefit we could gain), so rather I chose not to exclude these type of variables.  
+    
+  
+An example of removing some of the observations that are missing information in high-significance columns:  
 ```{r}
 data <- data[!is.na(curr_assets) | !is.na(curr_liab)]
 data <- data[!(is.na(ind) | ind == "")]
 data <- data[!(is.na(region_m) | region_m == "")]
 data <- data[!is.na(founded_year)]
 ```
-  
-  
-Remove some variables that are likely not useful, given the very large number of NAs:
+
+A short example of removing some of the variables that are likely not useful, given the very large number of NAs:
 ```{r}
 data[, c("D", 
          "COGS", 
@@ -83,6 +89,14 @@ data[, c("D",
          "exit_year",
          "wages") := NULL]
 ```
+
+  
+The next step to take is to compile the dataset in a format that will be usable for predictions (every predictor in its on row, every observational unit is in its on column).  
+  
+  
+Generally, multiple years of data are used for prediction. The "current year" is when the default happens - and prediction is based on the financials and some other variables in the preceding two years.   
+There is a purposeful limitation here - any company that hasn't been active for at least two years will be dropped. This is a significant constraint, but one with a business-minded driver: very young companies will have strongly different performance dynamics that more matures. Hence, in my view, their default prediction should be based on separate models and likely a lot more expert judgement.  
+Technically, this was a trade-off of having a good-model for a limited scope versus a likely less-good (as the available predictors would be more shallow) model for a larger scope. I chose the first option.  
 
 
 ```{r, echo= FALSE}
@@ -114,7 +128,7 @@ data_prev2 <- data[year < 2015,.(comp_id,
 data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE) #filters down population. #TODO explain consequences
 ?merge
 
-dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all = TRUE)
+dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE)
 
 #only use years where the full dataset is available generally
 dt <- dt[year != 2011 &
@@ -125,6 +139,10 @@ rm(data)
 rm(data_prev)
 rm(data_prev2)
 ```
+  
+  
+The final dataset I am working with is based of companies and defaults happening between 2013 - 2015.  
+
 
 ```{r, include= FALSE}
 fun_replace_na <- function(x) {
@@ -133,8 +151,14 @@ fun_replace_na <- function(x) {
 }
 ```
 
-
+  
+The last important step of data cleansing was to:  
+    - recode the industry variable to have only two levels (from previously three), by merging the small "Manufacturing" cohort into the larger one
+    - some metrics that were left as NAs (see table below) were recoded as 0, as upon inspecting them I made the judgment that these are likely rather true 0-s than missing data points (so observations weren't missing just at random)  
+    
+    
 ```{r, echo= FALSE}
+
 fun_count_na(dt)
 
 #fix founded_year
@@ -153,15 +177,11 @@ dt[, region := ifelse(is.na(region), prev_region, region)]
 dt[, prev_region := NULL]
 dt[, region := factor(region, levels= c("West", "Central", "East"))]
 
-fun_count_na(dt)
-
 cols = names(dt)
-dt[, (cols) := lapply(.SD, fun_replace_na), .SDcols = cols] # change for founded year
-
-fun_count_na(dt)
+dt[, (cols) := lapply(.SD, fun_replace_na), .SDcols = cols]
 ```
 
-After some data handling in the backend (for technical details please see full code in the .rmd file), it's time to create an indicator for default.  
+Now it's time to create an indicator for default.  
   
 [Definition for default](https://www.investopedia.com/terms/d/default2.asp): "... debtor is unable to meet the legal obligation of debt repayment...". Hence, the first requirement is to have some obligations to begin with.  
 
@@ -177,19 +197,10 @@ Code to create the target variable, is_defaulted:
 dt[, is_defaulted := ifelse((curr_sales == 0 & prev_sales > 0) &
                             (curr_liab > 0 | (prev_liab > 0 & is_dropped == 1))
                             , 1, 0)]
-
-#TODO: explain logic
 ```
-
-Example of dropped but not defaulted by this logic:
-```{r}
-head(dt[is_dropped==1 & is_defaulted == 0])
-
-## does this make sense?
-```  
   
   
-Summary by year (for reference, [here](https://www.ksh.hu/docs/hun/xftp/gyor/gaz/gaz1612.pdf) on p4 there is a table of "defaults" by industry):
+Summary by year (for reference, see: [here](https://www.ksh.hu/docs/hun/xftp/gyor/gaz/gaz1612.pdf) on p4 there is a table of "defaults" by industry):
   
 ```{r, fig.align='center', echo= FALSE}
 default_viz <- dt[, .(count= .N,
@@ -348,7 +359,7 @@ names(dt)
 
 
 ```{r}
-training_ratio <- 0.7
+training_ratio <- 0.6
 
 set.seed(93) #for reproducibility
 train_indices <- createDataPartition(y = dt[["is_defaulted"]],
@@ -357,13 +368,23 @@ train_indices <- createDataPartition(y = dt[["is_defaulted"]],
                                      list = FALSE)
 data_train <- dt[train_indices, ]
 data_test <- dt[-train_indices, ]
+
+split_ratio <- 3/4
+
+set.seed(93) #for reproducibility
+perf_indices <- createDataPartition(y = data_test[["is_defaulted"]],
+                                     times = 1,
+                                     p = split_ratio,
+                                     list = FALSE)
+data_test <- data_test[perf_indices, ]
+data_perf <- data_test[-perf_indices, ]
 ```
 
 ```{r}
 train_control <- trainControl(method = "cv",
                               number = 10,
                               classProbs = TRUE,
-                              summaryFunction=twoClassSummary)
+                              summaryFunction = twoClassSummary)
 ```
 
 #### Model 1 - basic glm
@@ -497,18 +518,13 @@ glmnet_calibration <- fun_calibration_create(glmnet_prediction_probs, test_truth
 #### Model 3
 
 ```{r}
-fitControl <- trainControl(method = "cv", 
-                           number = 10, 
-                           classProbs = TRUE,
-                           summaryFunction = twoClassSummary)
-
 set.seed(93)
 rpart_model <- train(is_defaulted ~ .,
                    data = data_train,
                    method = "rpart",
                    tuneLength=20,
                    metric="ROC",
-                   trControl = fitControl)
+                   trControl = train_control)
 
 ```
 
@@ -525,17 +541,12 @@ rpart_calibration <- fun_calibration_create(rpart_prediction_probs, test_truth, 
 #### Model 4
 
 ```{r}
-fitControl <- trainControl(method = "cv", 
-                           number = 10, 
-                           classProbs = TRUE,
-                           summaryFunction = twoClassSummary)
-
 set.seed(93)
 treebag_model <- train(is_defaulted ~ .,
                    data = data_train,
                    method = "treebag",
                    metric="ROC",
-                   trControl = fitControl)
+                   trControl = train_control)
 
 ```
 
