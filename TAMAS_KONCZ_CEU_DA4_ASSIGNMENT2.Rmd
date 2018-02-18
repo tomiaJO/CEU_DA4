@@ -366,7 +366,7 @@ train_control <- trainControl(method = "cv",
                               summaryFunction=twoClassSummary)
 ```
 
-#### Model 1
+#### Model 1 - basic glm
 
 ```{r}
 #base model
@@ -398,42 +398,71 @@ fun_calc_auc <- function(prediction_probs, truth) {
 ```{r, echo = FALSE}
 fun_roc_create <- function(prediction_probs, truth, AUC= NULL, model= NULL) {
 
-min_prob <- min(prediction_probs$Yes)
-max_prob <- max(prediction_probs$Yes)
-
-thresholds <- seq(0, max_prob, by = (max_prob - min_prob) / 100)
-
-true_positive_rates <- rep(0, length(thresholds))
-false_positive_rates <- rep(0, length(thresholds))
-
-for (ix in 1:length(thresholds)) {
-  thr <- thresholds[ix]
-  test_prediction <- ifelse(prediction_probs$Yes > thr, "Yes", "No")
-  test_prediction <- factor(test_prediction, levels = c("Yes", "No"))
-  cm <- as.matrix(confusionMatrix(test_prediction, truth))
-  true_positive_rates[ix] <- cm[1, 1] / (cm[1, 1] + cm[2, 1])
-  false_positive_rates[ix] <- cm[1, 2] / (cm[1, 2] + cm[2, 2])
-}
-
-manual_roc <- data.table("threshold" = thresholds,
-                         "true_positive_rate" = true_positive_rates,
-                         "false_positive_rate" = false_positive_rates)
-
-s_title <- ifelse(is.null(model), "", paste("ROC curve for Model:", model, sep = " "))
-s_subtitle <- ifelse(is.null(AUC), "", paste("AUC =", round(AUC, 2), sep = " "))
-
-ggplot(data = manual_roc, 
-       aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
-  geom_point() +
-  geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black") +
-  labs(title = s_title, subtitle = s_subtitle)
+  min_prob <- min(prediction_probs$Yes)
+  max_prob <- max(prediction_probs$Yes)
+  
+  thresholds <- seq(0, max_prob, by = (max_prob - min_prob) / 100)
+  
+  true_positive_rates <- rep(0, length(thresholds))
+  false_positive_rates <- rep(0, length(thresholds))
+  
+  for (ix in 1:length(thresholds)) {
+    thr <- thresholds[ix]
+    test_prediction <- ifelse(prediction_probs$Yes > thr, "Yes", "No")
+    test_prediction <- factor(test_prediction, levels = c("Yes", "No"))
+    cm <- as.matrix(confusionMatrix(test_prediction, truth))
+    true_positive_rates[ix] <- cm[1, 1] / (cm[1, 1] + cm[2, 1])
+    false_positive_rates[ix] <- cm[1, 2] / (cm[1, 2] + cm[2, 2])
+  }
+  
+  manual_roc <- data.table("threshold" = thresholds,
+                           "true_positive_rate" = true_positive_rates,
+                           "false_positive_rate" = false_positive_rates)
+  
+  s_title <- ifelse(is.null(model), "", paste("ROC curve for Model:", model, sep = " "))
+  s_subtitle <- ifelse(is.null(AUC), "", paste("AUC =", round(AUC, 2), sep = " "))
+  
+  ggplot(data = manual_roc, 
+         aes(x = false_positive_rate, y = true_positive_rate, color = threshold)) +
+    geom_point() +
+    geom_abline(intercept = 0, slope = 1,  linetype = "dotted", col = "black") +
+    labs(title = s_title, subtitle = s_subtitle)
 }
 ```
 
+```{r}
+fun_calibration_create <- function(prediction_probs, truth, model= NULL) {
+  
+  truth_numeric <- ifelse(truth == "Yes", 1, 0)
+  score <- prediction_probs$Yes
+  
+  actual_vs_predicted <- data.table(actual = truth_numeric,
+                                    predicted = score)
+  
+  actual_vs_predicted[, score_category := cut(predicted,
+                                      seq(0, 0.6, 0.05),
+                                      include.lowest = TRUE)]
+  
+  calibration <- actual_vs_predicted[, .(mean_actual = mean(actual),
+                                         mean_predicted = mean(predicted),
+                                         num_obs = .N),
+                                     keyby = .(score_category)]
+  
+  s_title <- ifelse(is.null(model), "", paste("Calibration plot for Model:", model, sep = " "))
+  
+  ggplot(calibration,
+         aes(x = mean_actual, y = mean_predicted, size = num_obs)) +
+    geom_point() +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+    ylim(0, 1) + xlim(0, 1) +
+    labs(title = s_title)
+}
+```
 
 ```{r, echo= FALSE}
 glm_AUC <- fun_calc_auc(glm_prediction_probs, test_truth)
 glm_ROC <- fun_roc_create(glm_prediction_probs, test_truth, glm_AUC, "glm")
+glm_calibration <- fun_calibration_create(glm_prediction_probs, test_truth, "glm")
 ```
   
   
@@ -462,6 +491,7 @@ glmnet_prediction_probs <- predict.train(glmnet_model, newdata = data_test, type
 ```{r, echo= FALSE}
 glmnet_AUC <- fun_calc_auc(glmnet_prediction_probs, test_truth)
 glmnet_ROC <- fun_roc_create(glmnet_prediction_probs, test_truth, glmnet_AUC, "glmnet")
+glmnet_calibration <- fun_calibration_create(glmnet_prediction_probs, test_truth, "glmnet")
 ```
 
 #### Model 3
@@ -489,9 +519,10 @@ rpart_prediction_probs <- predict.train(rpart_model, newdata = data_test, type= 
 ```{r, echo= FALSE}
 rpart_AUC <- fun_calc_auc(rpart_prediction_probs, test_truth)
 rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpart")
+rpart_calibration <- fun_calibration_create(rpart_prediction_probs, test_truth, "rpart")
 ```
 
-#### Model 3
+#### Model 4
 
 ```{r}
 fitControl <- trainControl(method = "cv", 
@@ -500,26 +531,31 @@ fitControl <- trainControl(method = "cv",
                            summaryFunction = twoClassSummary)
 
 set.seed(93)
-rf_model <- train(is_defaulted ~ .,
+treebag_model <- train(is_defaulted ~ .,
                    data = data_train,
-                   method = "rf",
-                   tuneLength=20,
+                   method = "treebag",
                    metric="ROC",
                    trControl = fitControl)
 
 ```
 
 ```{r}
-rpart_prediction_probs <- predict.train(rpart_model, newdata = data_test, type= "prob")
+treebag_prediction_probs <- predict.train(treebag_model, newdata = data_test, type= "prob")
 ```
 
 ```{r, echo= FALSE}
-rpart_AUC <- fun_calc_auc(rpart_prediction_probs, test_truth)
-rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpart")
+treebag_AUC <- fun_calc_auc(treebag_prediction_probs, test_truth)
+treebag_ROC <- fun_roc_create(treebag_prediction_probs, test_truth, treebag_AUC, "treebag")
+treebag_calibration <- fun_calibration_create(treebag_prediction_probs, test_truth, "treebag")
 ```
 
+
 ```{r, fig.height=15, fig.width=15}
-grid.arrange(glm_ROC, glmnet_ROC, rpart_ROC, ncol = 1)
+grid.arrange(glm_ROC, glm_calibration,
+             glmnet_ROC, glmnet_calibration,
+             rpart_ROC, rpart_calibration,
+             treebag_ROC, treebag_calibration,
+             ncol = 2)
 ```
 
 ## APPENDIX
@@ -530,7 +566,7 @@ ggplot(data= dt, aes(x= factor(is_defaulted), y= log(prev_liab))) + geom_boxplot
 ```
 
 ```{r, eval= FALSE}
-dt[, liab_growth := ifelse(curr_liab>0 & prev_liab==0, 1, curr_liab/prev_liab)]
+dt[, liab_growth := ifelse(curr_liab > 0 & prev_liab == 0, 1, curr_liab/prev_liab)]
 
 ggplot(data= dt, aes(x= factor(is_defaulted), y= log(liab_growth))) + geom_boxplot()
 
