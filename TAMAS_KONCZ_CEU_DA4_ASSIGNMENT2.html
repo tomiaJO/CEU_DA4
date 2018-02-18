@@ -363,13 +363,13 @@ However, it has two benefits. One is the aforementioned probability calibration 
 <h4>Concerns: external validty and implication of sample-limitating decisions</h4>
 <p>Let’s start with sample limitating decisions, which are of two parts:<br />
 1. Some observations were left out - when deleting some records due to missing values, it also impacted the structure of our data. An obvious example for this is only looking at companies of 2 years and older. In a real-life scenario, it is not likely that we could limit our predictions this way.<br />
-However, as said before, in my view these companies need to be modelled, as analyzed differently, most likely in a lot-less quantifiable way.<br />
-There were also records dropped due to NAs, when their number was limited. However, we can’t rule out that these were structurally differnt than other observations - the available information on the bisnode dataset is very limited.<br />
+However, as said before, in my view these companies need to be modelled and analyzed differently, most likely in a lot-less quantifiable way.<br />
+There were also records dropped due to NAs, when their number was limited. However, we can’t rule out that these were structurally different from other observations - unfortunately the available information on the bisnode dataset is very limited.<br />
 Also, it’s unlikely that we could argue to our front-office bankers that we can’t model their client, so let’s just not extend a loan (but an actual bank always has the possibility of asking for more information)<br />
-2. Only a small subset of the variables (and in general, of business performance descriptive financials) were used.<br />
-This is not generally a bad thing until performance is good enough - here, I made this choice due to lack of available metadata and many missing inputs. When a project is of real $ impact, I would likely not remove half of the seemingly useful variables with a stroke of pen.</p>
-<p>The second concern is about the main thing about predictions - we are after predicting some events which are outside of our current observations.<br />
-Here, the main limitation is the sample size - we only modeled based on 3 years! And these 3 years are likely not descriptive of many economic scenarios happening in Hungary in the last 10-20 years, nevertheless of them in the future. This would be a challenging problem to address - if I was running a business where the bottom-line was dependend on the external validty of our default model, I’d built it into production to keep evaluating it live, and have warnings built-in if a recalibration is needed.</p>
+2. Only a small subset of the variables (and of business performance descriptive financials) were used.<br />
+This is not generally a bad thing until performance is good enough - here, I made this choice due to lack of available metadata and many missing inputs. When a project is of real $ impact, I would likely not remove half of the seemingly useful variables with a stroke of pen if they could improve performance even just by 1%.</p>
+<p>The second concern is about the main thing regarding predictions - we are after predicting some events which are outside of our current observations.<br />
+Here, the main limitation is the sample selection - we only modeled based on 3 years! And these 3 years are likely not descriptive of many economic (and political) scenarios happening in Hungary in the last 10-20 years, nevertheless of them in the future. These scenarios will be one a driving force of defaults. This would be a challenging problem to address - if I was running a business where the bottom-line was dependend on the external validty of our default model, I’d built it into production to keep evaluating it live, and have warnings built-in if a recalibration is needed.</p>
 </div>
 </div>
 
