@@ -37,14 +37,8 @@ ERR_SQ <- function(x, true_x) (x - true_x)^2
 
 ```{r, include= FALSE}
 rm(list=ls())
-x <- fread("./../Data/DA4/bisnode_all.csv",
+data <- fread("./../Data/DA4/bisnode_all.csv",
               stringsAsFactors = FALSE)
-
-print(skim(data))
-```
-
-```{r, echo= FALSE}
-data <- copy(x)
 ```
 
 ```{r, echo= FALSE}
@@ -60,17 +54,17 @@ fun_count_na <- function(dt) {
 ### Understanding the dataset  
 
 After simply reading in the dataset, first step is to understand what we are working with.
-A key component of data quality is completness, which is defined as having as little not-known values as possible for our variables.
+A key component of data quality is completness, which here is defined as having as little not-known values as possible for our variables.
 
-A glimpse into the missing values, order by most NA-s, top 10 below:
-```{r}
+A glimpse into the missing values, order by most NAs, top 10 below:
+```{r, echo = FALSE}
 fun_count_na(data)[1:10]
 ```
   
-  
-The approach I'm taking here is the following:   
+It's clear that the dataset is not "NA-sparse" by any means.
+My approach to address this here is the following:   
     - for some key variables, having NAs is not toleratable. As we are going to predict financial performance, a good example of key variables are liabilites or assets. If such variables are missing, the whole observation will be dropped.  
-    - for other variables, which are likely less important, if there are too many missing values, I'm simplying not using the variable for prediction. An example could be birth_year (CEO) - dropping these observations could be costly in terms of limiting our working sample too much (for the benefit we could gain), so rather I chose not to exclude these type of variables.  
+    - for other variables, which are likely less important, if there are too many missing values, I'm simplying not using the variable for prediction. An example could be birth_year (CEO) - dropping these observations could be costly in terms of limiting our working sample too much (for the benefit we could gain), so rather I chose not to include these type of variables.  
     
   
 An example of removing some of the observations that are missing information in high-significance columns:  
@@ -95,7 +89,7 @@ The next step to take is to compile the dataset in a format that will be usable 
   
   
 Generally, multiple years of data are used for prediction. The "current year" is when the default happens - and prediction is based on the financials and some other variables in the preceding two years.   
-There is a purposeful limitation here - any company that hasn't been active for at least two years will be dropped. This is a significant constraint, but one with a business-minded driver: very young companies will have strongly different performance dynamics that more matures. Hence, in my view, their default prediction should be based on separate models and likely a lot more expert judgement.  
+There is a purposeful limitation here - any company that hasn't been active for at least two years will be dropped. This is a significant constraint, but one with a business-minded driver ones. Hence, in my view, their default prediction should be based on separate models and likely a lot more expert judgement.  
 Technically, this was a trade-off of having a good-model for a limited scope versus a likely less-good (as the available predictors would be more shallow) model for a larger scope. I chose the first option.  
 
 
@@ -127,7 +121,7 @@ data_prev2 <- data[year < 2015,.(comp_id,
 
 data_prev <- merge(x = data_prev, y = data_prev2, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE) #filters down population. #TODO explain consequences
 
-dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.x = FALSE, all.y= FALSE)
+dt <- merge(x = data, y = data_prev, by = c("comp_id", "year"), all.x = FALSE, all.y= TRUE)
 
 #only use years where the full dataset is available generally
 dt <- dt[year != 2011 &
@@ -185,11 +179,11 @@ Now it's time to create an indicator for default.
 [Definition for default](https://www.investopedia.com/terms/d/default2.asp): "... debtor is unable to meet the legal obligation of debt repayment...". Hence, the first requirement is to have some obligations to begin with.  
 
 The definition of default for this exercise will follow the along this logic: looking at companies who had any liabilities during a year, but their performance deteoriated significantly the next, measured by sales dropping to 0.
-This definition is likely to be punitive, and not exactly relating to companies how have defaulted, but there are trade-offs in every decision in the lack-of and clear description for defaulted parties in the data.
+This definition is likely to be punitive, and not exactly relating to companies who have defaulted, but there are trade-offs in every decision in the lack-of any clear description for defaulted parties in the data.
 Limitation of this approach are:
     - Sales is not a good measure for default. What we would actually be interested in is companies filing for default on court, but given that's not available, we use sales dropping to zero as an indicatory dummy for businesses "closing down".  
-    But let's consider i.e. a project firm, that was created for a set of time purposefully - if these firms are not operating any longer those are not real defaults.
-    - We don't know what happened to firms that suddenly "exit" the dataset. AS a conservative approach (in terms of defining default scenarios as wide as possible), if a firm is no longer in the data, but had liabilities as of the last records, that will be considered a default.
+    However considering i.e. a project firm, that was created for a set of time purposefully - if these firms are not operating any longer those are not real defaults.
+    - We don't know what happened to firms that suddenly "exit" the dataset. As a conservative approach (in terms of defining default scenarios as wide as possible), if a firm is no longer in the data, but had liabilities as of the last records, that will be considered a default.
 
 Code to create the target variable, is_defaulted:
 ```{r}
@@ -272,7 +266,7 @@ dt[, prev_2_sales := ifelse(prev_2_sales>0, prev_2_sales, 0.1)]
 dt[,log_sales_2 := log(prev_2_sales)]
 ```
 
-Dropping variables which are not appropriate for prediction, given their availability might be only _after-the-fact_.
+Dropping variables which are not appropriate for prediction, given their availability might be only _after-the-fact_ of the default.
 
 ```{r}
 dt[, curr_liab := NULL]
@@ -416,7 +410,7 @@ rm(p3)
 
 We can see that the relationsip types for these variables are all-over the place. If we wanted to model these and their interactions properly, that could be done with further polynomial terms, dummy variables for some cuts, etc.  
   
-However, here the goal is to create the best predictive model, with the great-ease that this being a University project, there is no need to create an explainable model for stakeholders.  
+However, here the goal is to create the best predictive model, with the great-ease that this being a University project, there is no need to create an explainable model for getting buy-in from stakeholders.  
 Hence, we will see the power of some flexible tree-based ML-models, which can model these relationships without much analyst adjustment - and I am not going to create further extra terms.  
 
     
@@ -468,11 +462,11 @@ train_control <- trainControl(method = "cv",
                               summaryFunction = twoClassSummary)
 ```
 
-#### Model 1 - basic glm  
+#### Model 1 - basic logit  
   
 The first model trained is a simple logit model, with only a subset of variables used.  
   
-(For this model, and all others, caret is set to optimize the AUC.)  
+(For this model, and all others, caret is set to maximize the AUC)  
 
 ```{r}
 #base model
@@ -574,11 +568,11 @@ glm_calibration <- fun_calibration_create(glm_prediction_probs, test_truth, "glm
 ```
   
   
-#### Model 2  
+#### Model 2 - regularized logit  
   
 The second model to be created is also a Logit-model.  
 However, compared to the previous example, we'll let the machine do some of our work - there is no variable selection by analyst judgment.  
-Rather, we are using LASSO- and Ridge regularization, and let the lamdba parameter be optimized by glmnet's grid-search algorithm (below range for lambda search was pre-selected based on some trial runs).  
+Rather, we are using LASSO- and Ridge regularization, and let the lambda parameter be optimized by glmnet's grid-search algorithm (below range for lambda search was pre-selected based on some trial runs).  
 
 
 ```{r}
@@ -607,9 +601,9 @@ glmnet_ROC <- fun_roc_create(glmnet_prediction_probs, test_truth, glmnet_AUC, "g
 glmnet_calibration <- fun_calibration_create(glmnet_prediction_probs, test_truth, "glmnet")
 ```
 
-#### Model 3  
+#### Model 3 - single classification tree  
   
-The third method is a single tree, which has a nice advantage compared to previous method, as it is able to pick-up non-linearities without much interaction, simply by creating multiple splitting-nodes of the same variable (similarly it goes for interactions between variables).  
+The third method is a single tree, which has a nice advantage compared to previous methods, as it is able to pick-up non-linearities without much human intervention, simply by creating multiple splitting-nodes of the same variable (similarly it goes for interactions between variables).  
 The disadvantages of a single tree will be addressed by the next model.  
 
 ```{r}
@@ -633,7 +627,7 @@ rpart_ROC <- fun_roc_create(rpart_prediction_probs, test_truth, rpart_AUC, "rpar
 rpart_calibration <- fun_calibration_create(rpart_prediction_probs, test_truth, "rpart")
 ```
 
-#### Model 4  
+#### Model 4 - bagged trees  
 
 The last method being run utilizies bagging - bootstrap aggregation.  
 In this example, multiple trees are being fit on equal-sized, bootsrap selected sub-samples, and the final prediction is the aggregate of all these trees' separate prediction.   
@@ -683,11 +677,11 @@ ROC curve show that even though there is (as usual) a trade-off in false positiv
 Let's discuss calibrations as well: the picture is more complex here. No model produces well-calibrated probabilities across the board. The large observation groups were more-or-less fitted nicely, however for smaller groups (which could be still significant for our purpose) the results vary a lot.  
 
 This is what led to the decision on the best model as well: while other methods were not consistent, bagging consistently overpredicted the further-from-0 probabilities.  
-Is this a good think? In  my view, predicting probabilities should be a conservative venture.  
+Is this a good think? In  my view, predicting default probabilities should be a conservative venture.  
   
-If I'm a lender, I'm certainly missing out on revenue opportunities if I'm overly risk-averse. However, our loss function should not be symmetrical, neither linear in this case - larger losses are almost certainly exponentially more painful than smaller ones, while by virtue of the business of lending (if we predict probabilities for that purpose), gains are limited.  
+If I'm a lender, I'm certainly missing out on revenue opportunities if I'm overly risk-averse. However, our loss function should not be symmetrical, neither linear (in terms of expected loss, which is ~default prob. * exposure) in this case - larger losses are almost certainly exponentially more painful than smaller ones, while by virtue of the business of lending (if we predict probabilities for that purpose), gains are limited.  
 
-Hence, my choice for the best model is model #4. Measured by AUC, it's a draw between this one and a signle tree.  
+Hence, my choice for the best model is model #4, tree bagging. Measured by AUC, it's a draw between this one and a single tree.  
 However, it has two benefits. One is the aforementioned probability calibration being better fit for the purpose, and the other is robustness - as discussed earlier, a single tree is prone to fall into local optimum. By having a more robust method, I expect we would achieve larger external validty for further use.
 
 ### Evaluating performance for the final model  
@@ -736,5 +730,17 @@ It's true that we do predict a lot of false negatives, but this is a deliberate 
 As the conclusion for this analysis, I'd like to share two things which I consider the main plausible limitations of this study:  
 
 
-#### Concerns: external validty and implication of sample-limitating decisions
+#### Concerns: external validty and implication of sample-limitating decisions  
+  
+Let's start with sample limitating decisions, which are of two parts:  
+    1. Some observations were left out - when deleting some records due to missing values, it also impacted the structure of our data. An obvious example for this is only looking at companies of 2 years and older. In a real-life scenario, it is not likely that we could limit our predictions this way.   
+    However, as said before, in my view these companies need to be modelled and analyzed differently, most likely in a lot-less quantifiable way.  
+    There were also records dropped due to NAs, when their number was limited. However, we can't rule out that these were structurally different from other observations - unfortunately the available information on the bisnode dataset is very limited.  
+    Also, it's unlikely that we could argue to our front-office bankers that we can't model their client, so let's just not extend a loan (but an actual bank always has the possibility of asking for more information)  
+    2. Only a small subset of the variables (and of business performance descriptive financials) were used.  
+    This is not generally a bad thing until performance is good enough - here, I made this choice due to lack of available metadata and many missing inputs. When a project is of real $ impact, I would likely not remove half of the seemingly useful variables with a stroke of pen if they could improve performance even just by 1%.
+    
+The second concern is about the main thing regarding predictions - we are after predicting some events which are outside of our current observations.  
+Here, the main limitation is the sample selection - we only modeled based on 3 years! And these 3 years are likely not descriptive of many economic (and political) scenarios happening in Hungary in the last 10-20 years, nevertheless of them in the future. These scenarios will be one a driving force of defaults.
+This would be a challenging problem to address - if I was running a business where the bottom-line was dependend on the external validty of our default model, I'd built it into production to keep evaluating it live, and have warnings built-in if a recalibration is needed.
 
